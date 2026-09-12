@@ -100,7 +100,7 @@ async def tv_thumb(
     network and, when streaming is routed, from the far end of the tunnel.
     """
 
-    from onlyfans_addon.registry import service as of_registry
+    from onlyfans_addon.registry import registry as of_registry
 
     scraper = of_registry().services.get(site)
 
