@@ -117,6 +117,29 @@ What that buys you:
   scrambled URL used as-is is a well-formed 404 rather than a loud failure, so
   it surfaces months later as "this scraper quietly stopped working".
 
+### Two traps in the scrapers that cost real time
+
+Carried over from the scrapers' own repository, which this add-on absorbed.
+
+**A gated rendition is substituted, not withheld.** A KVS player block happily
+advertises a quality it will not serve signed-out:
+
+```
+video_alt_url2: 'https://ultrathots.com/?login'
+video_alt_url2_text: '1080p'
+```
+
+Take the label at face value and the quality picker offers 1080p, the player
+fetches it, and renders an HTML login page as video. **Only `/get_file/` URLs
+are accepted as real renditions.** This is KVS behaviour rather than one
+site's quirk, so assume it applies to any new site added here.
+
+**The performer index and the content grids use different card classes** —
+`item second-card` on the index, `main-card` on the video and album grids —
+and those class names differ *between* sites while the URL shapes do not.
+Selecting on a class name silently works on one page and returns nothing on
+the next, which is why every selector here keys on the href shape instead.
+
 ## Evaluate a site before writing it
 
 The two things that disqualify a candidate are cheap to check and expensive to

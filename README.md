@@ -29,6 +29,44 @@ key all at once.
 - **Streams videos and galleries live** from the archive sites, proxied so the
   browser never sees a tokened URL that would 403 on it.
 
+## The scrapers come with it
+
+`scrapers/` ships in this repository and is loaded from wherever the add-on is
+installed, so there is nothing to mount and no separate folder to keep in
+sync — installing the add-on installs the scrapers.
+
+**Updating the add-on updates them.** Settings → Plugins → Add-ons →
+*Check for updates*, then the update arrow: the host fast-forwards this
+repository, forgets the add-on's cached modules and re-reads everything from
+disk, scrapers included. No restart.
+
+The `plugin_dir` setting overrides the folder and is empty by default. Set it
+only if you keep your own copies somewhere else; an empty value means the
+bundled `scrapers/`, which is what you want.
+
+## What each site actually gives you
+
+Measured against the live sites, not taken from their marketing. Worth reading
+before expecting a feature to work:
+
+| Site | Accounts/page | Avatars | Duration | Thumbnails | Per-account galleries |
+| --- | --- | --- | --- | --- | --- |
+| ultrathots | 25 | yes | yes | yes | yes, but gated |
+| porn4fans | 20 | yes | yes | yes | none on the site |
+| porntn | 12 | no | yes | yes | 1 image per album |
+| hornyfap | 12 | no | yes | yes | none on the site |
+| notfans | 12 | no | no | yes | not attributable |
+
+Two gaps are the sites' doing rather than the scrapers':
+
+- **Avatars exist on two of the five.** The other three render a "no image"
+  placeholder for every model in their index, which is why accounts are
+  deduplicated across sites and why the onlyfans.com profile lookup matters.
+- **Images barely exist.** ultrathots is the only site tying galleries to a
+  performer, and a signed-out visitor sees six images of a gallery whose own
+  title advertises hundreds. notfans has full galleries it cannot attribute to
+  anyone.
+
 ## Its data
 
 One Postgres schema, `onlyfans`, holding three tables and its own
