@@ -166,7 +166,9 @@ def test_every_rail_has_an_ordering():
     television's screen is assembled from the list rather than from a copy.
     """
 
+    import ast
     import inspect
+    import textwrap
 
     from onlyfans_addon import tv
     from onlyfans_addon.rails import RAILS
@@ -199,10 +201,22 @@ def test_every_rail_has_an_ordering():
         "RAILS" in source,
         "tv_browse no longer walks RAILS",
     )
+
+    # STRING LITERALS, not the raw text. A comment is free to say "empty until
+    # the ranking pass has run -- twice, for Trending"; what must not appear
+    # is a heading the television would actually draw, because that is a rail
+    # this file has started owning a copy of.
+    literals = {
+        node.value
+        for node in ast.walk(ast.parse(textwrap.dedent(source)))
+        if isinstance(node, ast.Constant) and isinstance(node.value, str)
+    }
+    written = sorted(literals & {rail.title for rail in RAILS})
+
     check(
         "the television names no rail of its own",
-        not any(rail.title in source for rail in RAILS),
-        "a rail heading is written into tv.py",
+        not written,
+        f"rail headings written into tv.py: {written}",
     )
 
 
