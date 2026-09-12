@@ -35,6 +35,7 @@ from typing import Annotated
 
 import httpx
 from fastapi import APIRouter, Body, File, HTTPException, Query, Request, UploadFile
+from starlette.concurrency import run_in_threadpool
 from fastapi.responses import StreamingResponse
 from loguru import logger
 from pydantic import BaseModel
@@ -924,7 +925,16 @@ async def stream(
 ) -> StreamingResponse:
     """Resolve and proxy one rendition, passing Range through both ways."""
 
-    resolved = _resolve(site, video_id)
+    """
+    Resolved IN A THREAD. `_resolve` is a synchronous scrape, and this
+    endpoint is `async def` -- calling it directly ran it ON THE EVENT LOOP,
+    where it blocks every other request the backend is serving for as long as
+    the site takes to answer. A site that has gone away hangs rather than
+    refusing, so that is minutes, and it takes the whole API down with it.
+    The sync `/sources` and `/handoff` above never had this problem: FastAPI
+    already runs a plain `def` in a threadpool.
+    """
+    resolved = await run_in_threadpool(_resolve, site, video_id)
 
     if index >= len(resolved):
         raise HTTPException(status_code=404, detail="No such source")

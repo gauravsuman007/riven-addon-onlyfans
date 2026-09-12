@@ -75,6 +75,13 @@ Anything beyond that is reaching into the host's internals and will break.
 - **`avatar_from_site`** marks a borrowed picture. Without it, `avatar_url or
   ...` could never upgrade an archive thumbnail to the performer's own.
 
+## Planned work
+
+`docs/recommendations.md` is the design for ranked rails (Trending, Most
+popular, Rising, New). Nothing in it is implemented. Its two load-bearing
+findings: popularity does **not** come from onlyfans.com, and `DirectVideo.views`
+is already parsed by every scraper and then discarded.
+
 ## What a change here has to preserve
 
 - **One file, one `DirectScraper` subclass.** `key` is unique and is what
