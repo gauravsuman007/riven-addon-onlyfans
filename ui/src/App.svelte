@@ -3,7 +3,7 @@
     import Grid from "./Grid.svelte";
     import Detail from "./Detail.svelte";
 
-    let { path = "", api, navigate } = $props();
+    let { path = "", api, navigate, host } = $props();
 
     configure(api);
 
@@ -20,7 +20,7 @@
     <div class="ofx-wrap">
         {#if handle}
             {#key handle}
-                <Detail {handle} {navigate} />
+                <Detail {handle} {navigate} {host} />
             {/key}
         {:else}
             <Grid {navigate} />

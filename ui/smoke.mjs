@@ -89,7 +89,24 @@ globalThis.fetch = async (url) => {
 
 const mount = (await import(process.argv[2])).default;
 const target = dom.window.document.getElementById("root");
-const handle = mount({ target, path: "", api: "/api/v1/x/onlyfans", navigate: () => {} });
+/*
+    The host bridge, captured rather than stubbed away.
+
+    A video must reach the HOST's player -- that is what carries the external
+    hand-off, bookmarking and resume. This add-on rendered a `<video>` of its
+    own instead, which inside the Android shell had nowhere to go but the
+    browser; the assertion below is what stops it regressing to that.
+*/
+const played = [];
+const host = { play: (options) => played.push(options) };
+
+const handle = mount({
+    target,
+    path: "",
+    api: "/api/v1/x/onlyfans",
+    navigate: () => {},
+    host
+});
 
 await new Promise((r) => setTimeout(r, 300));
 
@@ -132,6 +149,25 @@ const videoCalls = calls.slice(before).filter((c) => c.includes("/videos"));
 
 console.log("site opens and renders its videos:", opened.includes("A Clip"));
 console.log("fetches that site exactly once:", videoCalls.length === 1, `(${videoCalls.length})`);
+
+// Playing one: through the host, with everything the host's player needs to
+// hand it to another application (site + videoId identify it; the host adds
+// which add-on it came from).
+const card = [...target.querySelectorAll("button")].find((b) =>
+    (b.textContent || "").includes("A Clip")
+);
+card?.click();
+await new Promise((r) => setTimeout(r, 50));
+
+console.log("play goes to the host's player:", played.length === 1);
+console.log(
+    "hand-off identity travels:",
+    played[0]?.site === "hornyfap" && played[0]?.videoId === "v1"
+);
+console.log(
+    "no <video> of its own:",
+    !target.innerHTML.includes("<video")
+);
 
 handle.destroy();
 console.log("after destroy, empty:", target.innerHTML.trim() === "");

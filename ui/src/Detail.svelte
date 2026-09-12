@@ -3,13 +3,23 @@
     import Poster from "./Poster.svelte";
     import SiteSection from "./SiteSection.svelte";
 
-    let { handle, navigate } = $props();
+    let { handle, navigate, host } = $props();
 
     let account = $state(null);
     let failed = $state(false);
     let mode = $state("videos");
     let opened = $state(new Set());
 
+    /*
+        Only used when there is no host player to hand the video to.
+
+        There always is one in this app -- the host lends its player to every
+        add-on it mounts -- so this is the fallback for a host too old to pass
+        a bridge, not a second player with a life of its own. The host's is
+        strictly better: external hand-off, bookmarking, resume, gestures, and
+        inside the Android shell a route to a real player instead of a
+        `<video>` the WebView can only send to the browser.
+    */
     let playing = $state(null);
     let lightbox = $state(null);
     let lightboxError = $state(null);
@@ -40,6 +50,35 @@
         const next = new Set(opened);
         next.has(site) ? next.delete(site) : next.add(site);
         opened = next;
+    }
+
+    function play(video) {
+        if (!host?.play) {
+            playing = video;
+            return;
+        }
+
+        host.play({
+            // The backend proxy, never the site's own URL: that one carries a
+            // short-lived token and these hosts check Referer, so a player
+            // pointed straight at it would 403.
+            src: streamUrl(video.site, video.video_id),
+            title: video.title,
+            // The real type is not known until the backend resolves the
+            // source, and the proxy reports it on the response. MP4 is the
+            // right opening guess; the player falls back if the element
+            // rejects it.
+            mimeType: "video/mp4",
+            poster: video.thumbnail ?? undefined,
+            site: video.site,
+            videoId: video.video_id,
+            // What the player labels a bookmark with. The performer is the
+            // context these videos were found under.
+            contextTitle: account?.display_name || handle,
+            duration: video.duration,
+            resolution: video.resolution,
+            size: video.size
+        });
     }
 
     async function openGallery(gallery) {
@@ -206,7 +245,7 @@
             handle={account.handle}
             site={source.site}
             {mode}
-            onplay={(video) => (playing = video)}
+            onplay={(video) => play(video)}
             ongallery={openGallery} />
     {/each}
 {:else}
@@ -214,9 +253,10 @@
 {/if}
 
 <!--
-    Playback goes through the backend proxy, never the site's own URL: that one
-    carries a short-lived token and these hosts check Referer, so a <video src>
-    pointed straight at it would 403.
+    The fallback player, shown only when the host lent no bridge (see `play`).
+    Playback goes through the backend proxy either way, never the site's own
+    URL: that one carries a short-lived token and these hosts check Referer,
+    so a <video src> pointed straight at it would 403.
 -->
 {#if playing}
     <div class="ofx-overlay">
