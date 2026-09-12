@@ -13,6 +13,7 @@ in the host's `test_vpn.py` have to live with each copy -- and a copy nobody
 checks is exactly how the thing they guard against comes back.
 """
 
+import re
 import sys
 from pathlib import Path
 
@@ -335,3 +336,51 @@ test_the_similarity_terms()
 
 print(f"\n{PASS} passed, {FAIL} failed")
 sys.exit(1 if FAIL else 0)
+
+
+def test_no_scraper_follows_a_redirect_off_a_model_page():
+    """A missing performer must come back empty, never as someone else's videos.
+
+    This is the shape of a bug that shipped and ran unnoticed. porntn answers
+    **301 to its own homepage** for a model it does not carry, rather than the
+    404 its four siblings answer. `_get` follows redirects, so `account_videos`
+    received a valid 200 holding the homepage's newest-thirty grid, and the
+    card parser -- which has no way to know which page it is reading -- lifted
+    thirty real videos out of it.
+
+    Nothing failed. No exception, no empty list, no log line. Four handles,
+    three of them deliberate nonsense, returned the same thirty video ids with
+    100% overlap, each attributed to a different performer.
+
+    That is why this test reads the source rather than making a request: the
+    live site is free to stop redirecting tomorrow, and the property worth
+    holding is not "porntn currently 404s" but "a scraper that asks for a model
+    page decides for itself what a redirect means". Any scraper reaching a
+    model path through a redirect-following helper is the bug again.
+    """
+
+    for path in sorted((ROOT / "scrapers").glob("*.py")):
+        text = path.read_text()
+
+        # Only scrapers that actually fetch a model page can have the bug.
+        if "/models/{handle}" not in text:
+            continue
+
+        guarded = (
+            "allow_redirects=False" in text and "is_redirect" in text
+        )
+        # A scraper whose model fetches all go through the shared `_get` is
+        # relying on that helper's redirect following, which is exactly the
+        # unguarded case -- unless the site 404s, which the sibling scrapers
+        # do and which leaves nothing to guard.
+        reaches_via_get = bool(
+            re.search(r"self\._get\(\s*\n?\s*f?\"\{self\.base_url\}/models/", text)
+        )
+
+        check(
+            f"{path.name}: a model page is fetched without blindly following redirects",
+            guarded or not reaches_via_get,
+            "model pages are fetched through a redirect-following helper; "
+            "a site that 301s an unknown model to its homepage would return "
+            "that homepage's videos as this performer's",
+        )

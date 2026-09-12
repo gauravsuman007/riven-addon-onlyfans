@@ -68,11 +68,47 @@ class PornTNScraper(DirectScraper):
         response = self._get(f"{self.base_url}/models/{_page_suffix(page)}")
         return _accounts(response.text, self.base_url, self.key)
 
+    def _model_page(self, path: str, **kwargs):
+        """A model page, or None when this site does not have that model.
+
+        THE REASON THIS EXISTS. Unlike its four siblings, which answer 404 for
+        a model they do not carry, porntn answers **301 to its own homepage**.
+        `_get` follows redirects, so the caller was handed a perfectly valid
+        200 containing the homepage's newest-thirty grid -- and every parser
+        here reads video cards out of it happily.
+
+        The result was not an empty page or an error. It was thirty real
+        videos of *other people* attributed to whoever was asked for, identical
+        for every handle including ones that cannot exist. Measured: four
+        handles, three of them nonsense, returned the same thirty ids with
+        100% overlap.
+
+        So redirects are not followed, and a 3xx is read as the site's way of
+        saying "no such model". Following it is what created the bug; refusing
+        to is the whole fix.
+        """
+
+        response = self.session.get(
+            f"{self.base_url}{path}", allow_redirects=False, timeout=20, **kwargs
+        )
+
+        if response.is_redirect or response.is_permanent_redirect:
+            logger.debug(
+                f"{self.key}: no model at {path} "
+                f"(redirected to {response.headers.get('location', '?')})"
+            )
+            return None
+
+        response.raise_for_status()
+        return response
+
     def account_profile(self, handle: str) -> DirectAccount | None:
         try:
-            response = self._get(f"{self.base_url}/models/{handle}/")
+            response = self._model_page(f"/models/{handle}/")
         except Exception as exc:
             logger.debug(f"{self.key}: no profile page for {handle}: {exc}")
+            return None
+        if response is None:
             return None
         return _profile(response.text, self.base_url, self.key, handle)
 
@@ -80,10 +116,12 @@ class PornTNScraper(DirectScraper):
         # ``sort_by=post_date`` rather than the site's default: a feed the user
         # reads as chronological must not silently be ordered by popularity on
         # one site out of five.
-        response = self._get(
-            f"{self.base_url}/models/{handle}/{_page_suffix(page)}",
+        response = self._model_page(
+            f"/models/{handle}/{_page_suffix(page)}",
             params={"sort_by": "post_date"},
         )
+        if response is None:
+            return []
         return _videos(response.text, self.base_url, self.key, limit=None)
 
 
