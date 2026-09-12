@@ -234,3 +234,46 @@ cannot stop downleveling either, or webOS 23 renders it with no styles at all.
 Keep authoring plain class selectors. The one rule the build must never touch
 is a `@keyframes` selector: prefixing `0%` produces a keyframe that matches
 nothing and kills the animation with no error.
+
+
+## The television is a third surface, and it reads data not markup
+
+`riven-tv` renders for sets running engines from about 2016 and **cannot run
+`ui/addon.js`** — dynamic `import()` is Chromium 63, that target is 53. So
+this add-on answers `tv/browse`, `tv/detail` and `tv/play` with plain JSON
+(`onlyfans_addon/tv.py`) and a generic renderer over there draws it. The full
+contract is `docs/tv.md`.
+
+Two deliberate differences from the web page, both forced by the remote:
+
+- **Every site is fetched on the detail screen**, where the web page makes
+  each one a button. A page of buttons that each load a section is fine with a
+  pointer and tedious with a directional pad, and the sections are what the
+  viewer came for. A site that fails is named among the facts rather than
+  raising — the other three still have videos on them.
+- **No galleries.** The lightbox is a keyboard-and-pointer affordance, image
+  coverage is thin ([[onlyfans-profile-match-rate]] territory: effectively one
+  site, a handful per gallery), and a television is the worst surface for
+  stills.
+
+### Two of these hosts refuse a still to a viewer's device
+
+hornyfap and porn4fans answer **403 to a plain GET** for their own
+thumbnails. Not a referer check — `referrerpolicy="no-referrer"` covers those,
+which is why the other sites are fine — a bot filter that wants a browser's
+headers. A television asking directly gets twenty blank tiles, which reads as
+a page that failed rather than a host being difficult.
+
+`PROXY_THUMBNAILS` in `tv.py` names them, and their stills go out as a path on
+this add-on's own mount which the set fetches back through itself. **A list,
+not "proxy everything":** proxying is a round trip per picture and a grid is
+sixty of them. Add a site when its stills come back blank, and not before —
+all thirteen hosts the tube add-on's stills come from answer 200 directly.
+
+`tv/thumb` is **not an open proxy**, which is why it takes a site as well as a
+URL: the host must be the one that scraper serves, from its own `base_url`.
+Without that it would fetch anything on the internet on request, from inside
+the household's network and, when streaming is routed, from the far end of the
+tunnel. Only a leading `www.` label is tolerated (porn4fans serves stills from
+`www.` while its `base_url` is bare); a suffix comparison would admit
+`porn4fans.com.attacker.net`.
