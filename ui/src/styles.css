@@ -65,18 +65,40 @@
     max-width: 2400px;
 }
 
+/*
+    The display name and its verified tick, on ONE line.
+
+    As inline content the tick wrapped to a line of its own under the name --
+    an `h1` at a `clamp()` that reaches 2.75rem sets a line box tall enough
+    that a 1.25rem inline SVG plus the space before it did not always fit the
+    remainder, and where it did not, the badge dropped. A flex row cannot
+    break between them.
+
+    2rem rather than 2.75: OnlyFans' own profile name is close to this app's
+    body scale, and the larger clamp read as a page title for the add-on
+    instead of a performer's name.
+*/
 .ofx h1 {
-    font-size: clamp(1.75rem, 4vw, 2.75rem);
-    font-weight: 500;
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    font-size: clamp(1.5rem, 2.5vw, 2rem);
+    font-weight: 600;
     letter-spacing: -0.02em;
     margin: 0;
+    /* The name is one token and can be longer than the column. */
+    overflow-wrap: anywhere;
 }
 
 .ofx-sub {
     color: var(--ofx-muted);
-    font-size: 0.75rem;
-    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-    margin: 0.25rem 0 0;
+    font-size: 0.8125rem;
+    margin: 0.2rem 0 0;
+}
+
+.ofx-dot {
+    opacity: 0.5;
+    margin: 0 0.15rem;
 }
 
 /* --- search ------------------------------------------------------------ */
@@ -190,8 +212,20 @@
 */
 .ofx-banner {
     position: relative;
-    aspect-ratio: 3 / 1;
-    max-height: 20rem;
+    /*
+        A HEIGHT, NOT A RATIO -- and the difference is the empty strip this
+        page was reported with.
+
+        `aspect-ratio: 3/1` plus `max-height` does not crop the banner, it
+        SHRINKS THE BOX: the ratio is satisfied by narrowing the element to
+        three times the capped height, so on a wide card the banner stopped
+        960px in and left bare card to the right of it. Width is not
+        negotiable here -- it is always the full card -- so height is what
+        gets to vary, and it tracks the viewport between a floor that still
+        shows a subject and OnlyFans' own ceiling.
+    */
+    width: 100%;
+    height: clamp(8rem, 17vw, 20rem);
 }
 
 .ofx-banner img {
@@ -234,8 +268,8 @@
 }
 
 .ofx-avatar {
-    width: 6rem;
-    height: 6rem;
+    width: 7.5rem;
+    height: 7.5rem;
     flex: none;
     border-radius: 9999px;
     overflow: hidden;
@@ -248,7 +282,7 @@
 /* Half the avatar's height, matching OnlyFans' proportion. Applied to the
    avatar rather than its row so nothing else is lifted with it. */
 .ofx-avatar.ofx-overlap {
-    margin-top: -3rem;
+    margin-top: -3.75rem;
 }
 
 .ofx-avatar img {
@@ -265,9 +299,12 @@
     and pushed the site buttons and all of the content below the fold.
 */
 .ofx-bio {
-    margin: 0.5rem 0 0;
+    margin: 0.6rem 0 0;
     max-width: 44rem;
-    color: var(--ofx-muted);
+    /* Body colour, as on OnlyFans: the bio is the performer's own copy, not
+       metadata about them. The muted tone belongs to the handle and stats. */
+    color: var(--ofx-fg);
+    line-height: 1.5;
     white-space: pre-line;
 }
 
@@ -322,7 +359,8 @@
     color: var(--ofx-accent);
     width: 1.25rem;
     height: 1.25rem;
-    vertical-align: middle;
+    /* Never squeezed by the name beside it in the flex row. */
+    flex: none;
 }
 
 /*
@@ -411,7 +449,19 @@
     grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
 }
 
+/*
+    A COLUMN, because a `<button>` centres its content.
+
+    Grid rows stretch every tile to the tallest in the row, and a button's
+    anonymous content box is centred inside it -- so a tile with a one-line
+    title sat 8px lower than its two-line neighbours and the row of
+    thumbnails came out visibly ragged. As a flex column the content packs to
+    the top and the thumbnails line up.
+*/
 .ofx-tile {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
     border: 0;
     padding: 0;
     background: none;
@@ -461,7 +511,12 @@
 }
 
 .ofx-section {
-    margin-bottom: 2rem;
+    margin-bottom: 2.5rem;
+}
+
+/* The section's own "load more" trails its grid rather than abutting it. */
+.ofx-section > .ofx-btn {
+    margin-top: 1rem;
 }
 
 .ofx-section h2 {

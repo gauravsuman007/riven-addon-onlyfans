@@ -178,9 +178,17 @@
                         </svg>
                     {/if}
                 </h1>
+<!--
+                    `@handle` first, because that is what OnlyFans puts under
+                    a performer's name and what the performer is known by.
+                    How many archive sites carry them is this app's own
+                    bookkeeping, so it trails.
+                -->
                 <p class="ofx-sub">
+                    @{account.of_username || account.handle}
+                    <span class="ofx-dot">·</span>
                     {account.source_count}
-                    {account.source_count === 1 ? "site" : "sites"} · {account.handle}
+                    {account.source_count === 1 ? "site" : "sites"}
                 </p>
 
                 {#if account.bio}
