@@ -171,13 +171,16 @@ class OnlyFansModel(BaseModel):
         ),
     )
     search_batch_size: int = Field(
-        default=20,
+        default=50,
         ge=1,
         le=200,
         description=(
-            "Accounts per fallback pass. Small, because a search engine is "
-            "asked at most once every twenty seconds and a large batch would "
-            "simply hold the pass open for an hour."
+            "Accounts per fallback pass. Sized against the archive lookup, "
+            "which is what actually finds these -- a couple of requests to a "
+            "host already being crawled, about five seconds an account. A "
+            "search engine, when one is reached at all, is far slower, but it "
+            "stands down for fifteen minutes the moment it declines, so it "
+            "does not hold the pass open."
         ),
     )
     search_interval: int = Field(
