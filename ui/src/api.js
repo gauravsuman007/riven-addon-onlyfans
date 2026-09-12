@@ -53,6 +53,14 @@ async function post(path, params) {
     this call with different arguments.
 */
 export const listAccounts = (params) => get("/accounts", params);
+
+/*
+    The rows of the landing page, and their order. Fetched rather than written
+    into this component so the television builds the same set from the same
+    list -- see `onlyfans_addon/rails.py`, which exists because a rail was
+    added here and the TV silently went on drawing the page before it.
+*/
+export const listRails = () => get("/rails");
 export const getAccount = (handle) => get(`/accounts/${encodeURIComponent(handle)}`);
 /*
     Performers whose videos are titled like this one's. Content-based, because

@@ -202,30 +202,33 @@
 }
 
 /*
-    THE BANNER IS SIZED BY RATIO, NOT BY A HEIGHT.
+    THE BANNER IS THE RATIO OnlyFans PUBLISHES AT, SO NOTHING IS CROPPED.
 
-    It used to be a fixed 8rem/11rem strip with `object-fit: cover`, which on a
-    wide viewport showed roughly a tenth of an OnlyFans header -- a slice of
-    artwork with no subject in it. OnlyFans headers are about 3:1, so that is
-    what this asks for, and `max-height` keeps a tall window from handing the
-    banner half the screen.
+    An OnlyFans header is uploaded and served at 3:1 (1920x640). This box is
+    the full width of the card and exactly a third of that in height, so the
+    image lands in a box the shape it already is and `cover` has nothing to
+    take off any edge. Whatever the performer chose to put in their header is
+    what shows -- which is the whole of what "identical to their OnlyFans page"
+    means for this strip.
+
+    THE TWO WAYS THIS HAS ALREADY GONE WRONG, both still true:
+
+      * `aspect-ratio: 3/1` plus a `max-height` does not crop, it SHRINKS THE
+        BOX. The ratio is satisfied by narrowing the element to three times the
+        capped height, so on a wide card the banner stopped short and left bare
+        card to the right of it. There is therefore no cap here at all.
+      * A fixed height with `cover` crops, and on a wide viewport it crops
+        hard: an 8rem strip across a 1200px card is showing a 9:1 slice of a
+        3:1 picture, which is a band of background with the subject cut out of
+        it. That is what "the banner is cropped" was.
+
+    A tall banner on a very wide window is the honest consequence of the shape
+    of the artwork, and it is what onlyfans.com itself does.
 */
 .ofx-banner {
     position: relative;
-    /*
-        A HEIGHT, NOT A RATIO -- and the difference is the empty strip this
-        page was reported with.
-
-        `aspect-ratio: 3/1` plus `max-height` does not crop the banner, it
-        SHRINKS THE BOX: the ratio is satisfied by narrowing the element to
-        three times the capped height, so on a wide card the banner stopped
-        960px in and left bare card to the right of it. Width is not
-        negotiable here -- it is always the full card -- so height is what
-        gets to vary, and it tracks the viewport between a floor that still
-        shows a subject and OnlyFans' own ceiling.
-    */
     width: 100%;
-    height: clamp(8rem, 17vw, 20rem);
+    aspect-ratio: 3 / 1;
 }
 
 .ofx-banner img {
@@ -236,19 +239,12 @@
 }
 
 /*
-    A short fade into the card below it, and nothing else. It used to be the
-    only thing keeping the identity block legible, which made legibility a
-    function of the banner's height: stretch the gradient and its per-pixel
-    opacity collapses. Text no longer overlaps the banner at all -- see
-    `.ofx-identity` -- so this is a seam, not a scrim.
+    NO FADE INTO THE CARD. onlyfans.com meets its header with a hard edge and
+    so does this; the gradient that used to sit here was a scrim left over from
+    when the name was drawn on top of the banner, and with the text moved below
+    it was fading a picture for no reason. Removing it is one of the "identical
+    to their OnlyFans page" changes, not a tidy-up.
 */
-.ofx-banner::after {
-    content: "";
-    position: absolute;
-    inset: auto 0 0;
-    height: 3rem;
-    background: linear-gradient(to top, var(--ofx-surface), transparent);
-}
 
 /*
     ONLY THE AVATAR OVERLAPS THE BANNER.
@@ -268,9 +264,26 @@
 }
 
 .ofx-avatar {
-    width: 7.5rem;
-    height: 7.5rem;
+    /* 128px and a 4px ring, which is what onlyfans.com draws. */
+    width: 8rem;
+    height: 8rem;
     flex: none;
+    /*
+        ABOVE THE BANNER, AND THIS IS WHY THE TOP OF EVERY AVATAR WAS MISSING.
+
+        `.ofx-banner` is positioned (it has to be -- the seam gradient is
+        absolute inside it) and this was not, and within one stacking context
+        a positioned element paints over a static one no matter which comes
+        first in the document. So the negative margin below lifted the avatar
+        into the banner's box and the banner painted straight back over the
+        half that had been lifted: a circle with its top sliced off, which
+        reads as a broken image rather than as a stacking order.
+
+        Positioning it is the fix; the z-index only makes the intent
+        unmissable to the next person who adds something positioned here.
+    */
+    position: relative;
+    z-index: 1;
     border-radius: 9999px;
     overflow: hidden;
     /* Thick enough to read as OnlyFans' ring rather than a hairline, and in
@@ -282,7 +295,7 @@
 /* Half the avatar's height, matching OnlyFans' proportion. Applied to the
    avatar rather than its row so nothing else is lifted with it. */
 .ofx-avatar.ofx-overlap {
-    margin-top: -3.75rem;
+    margin-top: -4rem;
 }
 
 .ofx-avatar img {

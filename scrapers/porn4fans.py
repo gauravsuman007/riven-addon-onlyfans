@@ -42,6 +42,12 @@ _MEDIA_PATH = "/get_file/"
 _SLUG_RE = re.compile(r"[^a-z0-9]+")
 _VIDEO_ID_RE = re.compile(r"/videos?/(\d+)")
 _MODEL_SLUG_RE = re.compile(r"/models/([^/?#]+)")
+#: OnlyFans usernames are 3-30 characters of letters, digits, underscore and
+#: dot. Anchored at the end of the path so a link carrying anything else is
+#: rejected rather than trimmed into something that looks like a username.
+_OF_USERNAME_RE = re.compile(
+    r"onlyfans\.com/([A-Za-z0-9._]{3,30})/?$", re.IGNORECASE
+)
 
 _IMPERSONATE = "chrome124"
 
@@ -190,7 +196,9 @@ def _profile(
     )
     bio = descriptions[0].text_content().strip() if descriptions else ""
 
-    if not avatar and not bio:
+    of_username = _of_username(tree)
+
+    if not avatar and not bio and not of_username:
         return None
 
     return DirectAccount(
@@ -200,7 +208,36 @@ def _profile(
         page_url=f"{base_url}/models/{handle}/",
         avatar=avatar,
         bio=bio or None,
+        of_username=of_username,
     )
+
+
+def _of_username(tree) -> str | None:
+    """The performer's onlyfans.com username, which this site links to.
+
+    ALONE AMONG THE FIVE ARCHIVES IN PUBLISHING IT, and it is worth having for
+    one reason: it is the fact that cannot be guessed. The index identifies an
+    account by a handle stripped to alphanumerics, and the profile pass turns
+    that back into username guesses -- which works seven times in ten and can
+    never work for someone whose username is not their name. `sophia-locke`
+    here is `thesophialocke` on the platform; no transformation of the slug
+    reaches that, and this page simply says so.
+
+    Matched on the href rather than on the social row's markup. The row is a
+    list of icons whose classes are the kind of thing a template redesign
+    renames without notice, while a link to onlyfans.com is unambiguous
+    wherever on the page it appears -- and a wrong guess here costs one
+    verification request, because the caller believes onlyfans.com and not
+    this site.
+    """
+
+    for link in tree.xpath("//a[contains(@href, 'onlyfans.com/')]"):
+        match = _OF_USERNAME_RE.search(link.get("href") or "")
+
+        if match:
+            return match.group(1)
+
+    return None
 
 
 def _videos(

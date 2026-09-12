@@ -31,7 +31,7 @@ import threading
 import time
 from dataclasses import asdict
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, Any
 
 import httpx
 from fastapi import APIRouter, Body, File, HTTPException, Query, Request, UploadFile
@@ -48,6 +48,7 @@ from onlyfans_addon.models import (
     OnlyFansAccountTerm,
     OnlyFansSyncRun,
 )
+from onlyfans_addon.rails import RAILS
 from onlyfans_addon.scraper_api.base import BROWSER_HEADERS
 from onlyfans_addon.service import OnlyFansService, normalise_handle
 from onlyfans_addon.service import STALE_AFTER
@@ -235,6 +236,26 @@ _ORDERS = {
     # meaning "all of a random selection" can have.
     "random": lambda q: q.order_by(func.random()),
 }
+
+
+@router.get("/rails", operation_id="list_onlyfans_rails")
+def list_rails() -> list[dict[str, Any]]:
+    """The rows of the landing page, in the order they are drawn.
+
+    Served rather than compiled into the page, so that every surface draws the
+    same set: the web page renders one rail per entry and the television builds
+    one section per entry, from this one list. See `onlyfans_addon/rails.py`
+    for why that is worth an endpoint.
+
+    `tv` is reported, not applied. Which rails suit a remote control is a fact
+    about the rail; whether to honour it is the renderer's business, and the
+    renderer is the only thing that knows which surface it is.
+    """
+
+    return [
+        {"order": rail.order, "title": rail.title, "note": rail.note, "tv": rail.tv}
+        for rail in RAILS
+    ]
 
 
 @router.get("/accounts", operation_id="list_onlyfans_accounts")

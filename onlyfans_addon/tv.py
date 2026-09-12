@@ -35,6 +35,7 @@ from loguru import logger
 
 from program.services.vpn import STREAMING, VpnUnavailable, vpn
 
+from onlyfans_addon.rails import RAILS
 from onlyfans_addon.scraper_api.base import BROWSER_HEADERS
 
 router = APIRouter(prefix="/tv", tags=["onlyfans-tv"])
@@ -184,30 +185,19 @@ def _offset(cursor: str) -> int:
     return max(0, value)
 
 
-@router.get("/browse", operation_id="onlyfans_tv_browse")
-def tv_browse(
-    q: Annotated[str | None, Query(max_length=120)] = None,
-    cursor: Annotated[str | None, Query(max_length=32)] = None,
-) -> dict[str, Any]:
-    """The performer grid.
+#: How many performers one rail holds on a television. The web page shows
+#: twenty and lets a pointer flick along the strip; a directional pad walks
+#: them one at a time, so a long row is a long press rather than a glance.
+RAIL_SIZE = 12
 
-    Reuses `list_accounts` rather than re-querying: the search there already
-    matches the collapsed handle as well as the display name, which is the
-    whole reason the collapsed form is stored, and a second query here would
-    be a second set of rules for the same box.
-    """
 
-    from onlyfans_addon.router import list_accounts
-
-    offset = _offset(cursor or "")
-    page = list_accounts(search=q, saved=None, limit=PAGE, offset=offset)
-
-    cards = [
+def _cards(accounts) -> list[dict[str, Any]]:
+    return [
         {
             "id": account.handle,
             "title": account.display_name,
             # The number of archives that carry them, which is also what the
-            # grid is ordered by -- so the ordering is legible rather than
+            # default order sorts by -- so the ordering is legible rather than
             # mysterious.
             "subtitle": f"{account.source_count} sites"
             if account.source_count != 1
@@ -215,17 +205,89 @@ def tv_browse(
             "image": account.avatar_url or "",
             "action": "open",
         }
-        for account in page.items
+        for account in accounts
     ]
+
+
+@router.get("/browse", operation_id="onlyfans_tv_browse")
+def tv_browse(
+    q: Annotated[str | None, Query(max_length=120)] = None,
+    cursor: Annotated[str | None, Query(max_length=32)] = None,
+) -> dict[str, Any]:
+    """The performer screen: the rails, then the whole index.
+
+    THE RAILS ARE NOT LISTED HERE. They come from `onlyfans_addon.rails`,
+    which is also what the web page renders from, so a rail added to the page
+    arrives on every television without this file being touched -- the failure
+    that produced that module was exactly this function quietly serving a
+    version of the page that no longer existed.
+
+    Searching or paging drops the rails and shows one flat list. A rail is a
+    recommendation and a search is an instruction; mixing them would put six
+    headings above the thing the viewer actually asked for, each of them
+    ignoring the query.
+
+    Reuses `list_accounts` rather than re-querying: its search already matches
+    the collapsed handle as well as the display name, which is the whole reason
+    the collapsed form is stored, and a second query here would be a second set
+    of rules for the same box.
+    """
+
+    from onlyfans_addon.router import list_accounts
+
+    term = (q or "").strip()
+    offset = _offset(cursor or "")
+    browsing = bool(term) or bool(cursor)
+
+    sections: list[dict[str, Any]] = []
+
+    if not browsing:
+        for rail in RAILS:
+            if not rail.tv:
+                continue
+
+            try:
+                page = list_accounts(order=rail.order, limit=RAIL_SIZE, offset=0)
+            except Exception as exc:
+                # One rail, not the screen. Most of these are empty until the
+                # ranking pass has run -- twice, for Trending -- and a screen
+                # that refuses to draw the index because a recommendation is
+                # not ready yet is worse than no recommendation.
+                logger.debug(f"OnlyFans TV: rail {rail.order} failed: {exc}")
+                continue
+
+            if not page.items:
+                continue
+
+            sections.append(
+                {
+                    "title": rail.title,
+                    "note": rail.note,
+                    "cards": _cards(page.items),
+                }
+            )
+
+    page = list_accounts(search=term or None, limit=PAGE, offset=offset)
+
+    if page.items:
+        sections.append(
+            {
+                # Named only when something is above it. On the searched or
+                # paged screen this list is the whole answer and a heading over
+                # it would be labelling the page with its own name.
+                "title": "All performers" if sections else "",
+                "cards": _cards(page.items),
+            }
+        )
 
     return {
         "title": "OnlyFans",
         "searchable": True,
         "placeholder": "Search performers",
-        "sections": [{"cards": cards}] if cards else [],
+        "sections": sections,
         "cursor": str(offset + PAGE) if offset + PAGE < page.total else None,
         "empty": "No performers matched that."
-        if (q or "").strip()
+        if term
         else "No performers indexed yet.",
     }
 

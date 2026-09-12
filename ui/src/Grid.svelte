@@ -14,7 +14,7 @@
         more -- which matters here because most of them are empty until the
         ranking pass has run, twice in Trending's case.
     */
-    import { listAccounts } from "./api.js";
+    import { listAccounts, listRails } from "./api.js";
     import AccountCard from "./AccountCard.svelte";
     import Rail from "./Rail.svelte";
 
@@ -47,6 +47,23 @@
     let debounce;
 
     let randomRail = $state(null);
+
+    /*
+        The rails come from the backend, which is also where the television
+        gets them. Written here as five literal components they drifted out of
+        sync with the TV the first time one was added, and nothing failed --
+        both surfaces drew a correct page, a version apart.
+
+        Empty until it answers: a rail that cannot be listed is a rail that
+        cannot be filled either, and the skeletons belong to each row.
+    */
+    let rails = $state([]);
+
+    $effect(() => {
+        listRails().then((result) => {
+            rails = Array.isArray(result) ? result : [];
+        });
+    });
 
     const query = $derived(search.trim());
     const browsing = $derived(query !== "" || showAll);
@@ -173,33 +190,22 @@
     {/if}
 {:else}
     <!--
-        Order is deliberate: what is moving now, then what is moving from
-        nowhere, then what is simply big, then what just arrived, then breadth.
-        Each rail hides itself when it has nothing, so on a fresh index this
-        collapses to the last two and the random row rather than to five
-        headings over five empty strips.
+        The rows, their wording and their order all arrive from `/rails`; the
+        reasoning behind that order is in `onlyfans_addon/rails.py`, beside the
+        list itself. Each rail hides itself when it has nothing, so on a fresh
+        index this collapses to the last two and the random row rather than to
+        five headings over five empty strips.
+
+        The random row is drawn separately because it is the only one with
+        controls of its own -- shuffle, and the way into the full grid.
     -->
-    <Rail
-        title="Trending"
-        note="fastest growing this week"
-        order="trending"
-        {navigate} />
-    <Rail
-        title="Rising"
-        note="growing fast from a small base"
-        order="rising"
-        {navigate} />
-    <Rail
-        title="Most popular"
-        note="most watched across the archive sites"
-        order="popular"
-        {navigate} />
-    <Rail title="New to the index" order="new" {navigate} />
-    <Rail title="Carried by the most sites" order="carried" {navigate} />
+    {#each rails.filter((rail) => rail.order !== "random") as rail (rail.order)}
+        <Rail title={rail.title} note={rail.note} order={rail.order} {navigate} />
+    {/each}
 
     <Rail
         bind:this={randomRail}
-        title="Something else"
+        title={rails.find((rail) => rail.order === "random")?.title ?? "Something else"}
         order="random"
         size={RANDOM_SIZE}
         {navigate}>

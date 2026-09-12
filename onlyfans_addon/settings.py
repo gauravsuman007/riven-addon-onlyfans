@@ -158,6 +158,35 @@ class OnlyFansModel(BaseModel):
             "the window is widened later."
         ),
     )
+    onlyfans_search: bool = Field(
+        default=True,
+        description=(
+            "For the accounts whose username could not be guessed, look it up "
+            "a second way: the archive sites' own published OnlyFans links "
+            "first, and failing that a search engine. Measured 2026-09-12, "
+            "the guessing pass identifies about 70% of the index; this is "
+            "for the rest. Every candidate is still confirmed against "
+            "onlyfans.com before it is recorded, and each account is searched "
+            "once ever. Deliberately slow -- search engines rate-limit it."
+        ),
+    )
+    search_batch_size: int = Field(
+        default=20,
+        ge=1,
+        le=200,
+        description=(
+            "Accounts per fallback pass. Small, because a search engine is "
+            "asked at most once every twenty seconds and a large batch would "
+            "simply hold the pass open for an hour."
+        ),
+    )
+    search_interval: int = Field(
+        default=1800,
+        ge=300,
+        description=(
+            "How often to run the fallback username search, in seconds."
+        ),
+    )
     onlyfans_enrich: bool = Field(
         default=True,
         description=(

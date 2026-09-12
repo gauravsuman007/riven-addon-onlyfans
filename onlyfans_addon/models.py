@@ -177,6 +177,16 @@ class OnlyFansAccount(Base):
     of_checked_at: Mapped[datetime | None] = mapped_column(
         sqlalchemy.DateTime(timezone=True), nullable=True
     )
+    # The SECOND chance, and it needs its own stamp for the same reason the
+    # first one does. `of_checked_at` means the username guesses were tried
+    # and answered; this means the fallback -- the archives' own published
+    # links, then a search engine -- was tried too. Sharing one column would
+    # make "guessed and missed" indistinguishable from "searched and missed",
+    # so either the fallback would never run or it would run forever over the
+    # same two thousand accounts.
+    of_searched_at: Mapped[datetime | None] = mapped_column(
+        sqlalchemy.DateTime(timezone=True), nullable=True
+    )
 
     sources: Mapped[list["OnlyFansAccountSource"]] = relationship(
         "OnlyFansAccountSource",

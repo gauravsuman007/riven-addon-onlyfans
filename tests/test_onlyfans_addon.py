@@ -155,26 +155,121 @@ def test_the_ranking_maths():
 
 
 def test_every_rail_has_an_ordering():
-    """The rails the page asks for are the orders the API offers.
+    """The rails exist, name real orderings, and reach every surface.
 
-    These are two lists in two languages -- `Grid.svelte` names them as
-    strings, `router.py` keys a dict on them -- and a typo in either produces
-    a 400 for one row of the page while every other row works.
+    THE FAILURE THIS GUARDS IS SILENT. A rail added to the web page and not to
+    the television leaves both surfaces internally consistent and one of them a
+    version behind; nothing 500s, nothing logs, and the only way to notice is
+    to look at a set. `onlyfans_addon/rails.py` is the single list both
+    renderers are built from, and these are the checks that keep it single --
+    that nothing names an ordering the index does not have, and that the
+    television's screen is assembled from the list rather than from a copy.
     """
 
+    import inspect
+
+    from onlyfans_addon import tv
+    from onlyfans_addon.rails import RAILS
     from onlyfans_addon.router import _ORDERS
 
-    wanted = {"trending", "rising", "popular", "new", "carried", "random"}
+    orders = {rail.order for rail in RAILS}
 
     check(
-        "the API offers every order the page asks for",
-        wanted <= set(_ORDERS),
-        f"missing {sorted(wanted - set(_ORDERS))}",
+        "every rail names an ordering the API offers",
+        orders <= set(_ORDERS),
+        f"missing {sorted(orders - set(_ORDERS))}",
     )
     check(
-        "the API offers nothing the page does not ask for",
-        set(_ORDERS) <= wanted,
-        f"extra {sorted(set(_ORDERS) - wanted)}",
+        "every ordering the API offers is on the page",
+        set(_ORDERS) <= orders,
+        f"unused {sorted(set(_ORDERS) - orders)}",
+    )
+    check("no two rails share an ordering", len(orders) == len(RAILS))
+    check("every rail has a heading", all(rail.title.strip() for rail in RAILS))
+    check("at least one rail reaches a television", any(rail.order for rail in RAILS if rail.tv))
+
+    # The television builds its sections by walking RAILS. Asserted on the
+    # source because the alternative is a live database: what must not happen
+    # is `tv/browse` growing its own list of rows, which is exactly the shape
+    # the drift took last time.
+    source = inspect.getsource(tv.tv_browse)
+
+    check(
+        "the television's screen is built from the shared list",
+        "RAILS" in source,
+        "tv_browse no longer walks RAILS",
+    )
+    check(
+        "the television names no rail of its own",
+        not any(rail.title in source for rail in RAILS),
+        "a rail heading is written into tv.py",
+    )
+
+
+def test_the_username_identity_check():
+    """A confirmed username has to belong to the right performer.
+
+    THE MOST DANGEROUS FAILURE IN THIS ADD-ON, and the only one that writes a
+    lasting wrong answer. The fallback finds usernames on other people's web
+    pages, and the guest API can only say whether a username EXISTS -- which
+    every one of them does, because each came off a real model's page.
+    Verified for existence alone, the pass stamped Holly Brougham with
+    `alannasworldx`: a real account, a real avatar, a real bio, all belonging
+    to somebody else, and nothing downstream with any reason to doubt it.
+
+    Measured on 40 accounts: 29 usernames confirmed to exist, 19 of them
+    strangers'. Every row below is from that sample, decided by hand.
+    """
+
+    from onlyfans_addon.discover import matches
+
+    # (handle, our display name, the page it was found on, the confirmed
+    #  profile's own name, whether it is really them)
+    sample = [
+        # Theirs: the archive slug is our handle, or the account says our name.
+        ("ameliaadams", "Amelia Adams", "amelia-adams", "Amelia Adams", True),
+        ("lolarose", "Lola Rose", "lola-rose", "Lola Rose \U0001f351", True),
+        ("titasahara", "Tita Sahara", "tita-sahara", "TITA SAHARA", True),
+        ("brandygordon", "Brandy Gordon", "brandy-gordon", "Brandy", True),
+        ("maddiewren", "Maddie Wren", "maddie-wren", "Maddie Wren - VIP", True),
+        ("sneesnaw", "Sneesnaw", "sneesnaw", "Sneesnaw VIP", True),
+        ("chanelbestcoast", "Chanelbestcoast", "chanelbestcoast", "Chanel", True),
+        # `megnut` is not derivable from `meganguthrie` in either direction.
+        # The profile behind it is called "Megan Guthrie", which settles it.
+        ("meganguthrie", "Megan Guthrie", "megnut", "Megan Guthrie", True),
+        # Strangers the archive's loose site search also returned. Each of
+        # these IS a real OnlyFans account.
+        ("hollybrougham", "Holly Brougham", "alannasworldx", "Alanna baby", False),
+        ("hollybrougham", "Holly Brougham", "josie-rae", "Josie Rae", False),
+        ("gracievalentino", "Gracie Valentino", "carlie-marie", "Carlie Marie", False),
+        ("acpent", "Acpent", "sara-ames", "Sara Ames", False),
+        ("lolarose", "Lola Rose", "katiedomsyou", "Katiedomsyou", False),
+        ("melztube", "MelzTube", "heidi-jo", "ModernGomorrah", False),
+        ("chanelbestcoast", "Chanelbestcoast", "skylar-mae", "Skylarmaexo", False),
+        # Near misses, rejected on purpose. A prefix rule would take the
+        # first and a contains rule would take both.
+        ("millaroyce", "Milla Royce", "milla", "Milla", False),
+        ("mayakayagaia", "Mayakayagaia", "yourlittlemaya", "Maya", False),
+    ]
+
+    wrong = [
+        (handle, evidence)
+        for handle, display, evidence, confirmed, want in sample
+        if matches(handle, display, evidence, confirmed) is not want
+    ]
+
+    check("the identity check agrees with every judged case", not wrong, str(wrong))
+
+    # Decoration is not a name. These are written with emoji, VIP suffixes and
+    # zero-width joiners, and anything short of stripping them compares
+    # ornament instead of identity.
+    check(
+        "emoji and suffixes do not defeat a real match",
+        matches("sophierain", "Sophie Rain", "", "Sophie Rain \U0001f4a6"),
+    )
+    check(
+        "an empty account matches nothing",
+        not matches("", "", "anything", "Anybody"),
     )
 
 
@@ -221,6 +316,7 @@ test_every_scraper_request_goes_through_the_routed_session()
 test_the_vendored_copies_have_not_drifted()
 test_the_ranking_maths()
 test_every_rail_has_an_ordering()
+test_the_username_identity_check()
 test_the_similarity_terms()
 
 print(f"\n{PASS} passed, {FAIL} failed")

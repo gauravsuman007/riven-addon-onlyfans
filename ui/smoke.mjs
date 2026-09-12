@@ -45,7 +45,16 @@ globalThis.fetch = async (url) => {
     return {
         ok: true,
         json: async () =>
-            String(url).includes("/similar")
+            // The rows of the landing page, which the backend owns so that
+            // the television draws the same ones. The page renders whatever
+            // this returns, so the stub is the contract.
+            String(url).includes("/rails")
+                ? [
+                      { order: "trending", title: "Trending", note: "fastest growing", tv: true },
+                      { order: "popular", title: "Most popular", note: "", tv: true },
+                      { order: "random", title: "Something else", note: "", tv: false }
+                  ]
+                : String(url).includes("/similar")
                 ? [
                       {
                           handle: "neighbour",
@@ -140,7 +149,14 @@ console.log("has search box:", html.includes('type="search"'));
     the outside. That exact bug already shipped once in `SiteSection`.
 */
 const railCalls = calls.filter((c) => c.includes("order="));
-console.log("one request per rail:", railCalls.length === 6, `(${railCalls.length})`);
+console.log("one request per rail:", railCalls.length === 3, `(${railCalls.length})`);
+// The rows come from `/rails`, so the page asks for them and draws what it is
+// given -- this is what keeps the web page and the television on one list.
+console.log("asks the backend which rails exist:", calls.some((c) => c.includes("/rails")));
+console.log(
+    "draws no rail the backend did not name:",
+    !html.includes("Carried by the most sites") && !html.includes("Rising")
+);
 console.log("popular rail rendered:", html.includes("Most popular"));
 console.log("random rail rendered:", html.includes("Something else"));
 // The stub answers `order=trending` with nothing, which is what a fresh index

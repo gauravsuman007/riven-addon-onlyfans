@@ -100,6 +100,14 @@ class OnlyFansAddon(Addon):
             # nothing until the next restart, which is the same trap as
             # binding settings to an attribute.
             service.scheduled_stats: {"interval": settings.stats_interval},
+            # The tail: accounts whose username the guesses could not reach.
+            # Its own job because its cost profile is nothing like the
+            # enrichment pass's -- a search engine answers about three times a
+            # minute before it starts refusing, so this one is paced in
+            # seconds per account rather than accounts per second. Registered
+            # unconditionally and gated inside `search_batch`, for the same
+            # reason the ranking pass is.
+            service.scheduled_search: {"interval": settings.search_interval},
         }
 
     def start(self) -> None:

@@ -20,6 +20,7 @@ else, and a run that dies halfway leaves everything it already committed.
 import bisect
 import math
 import re
+from collections.abc import Callable
 from datetime import datetime, timedelta
 
 from loguru import logger
@@ -872,6 +873,163 @@ class OnlyFansService:
             session.commit()
             return True
 
+    # --- The tail: accounts the guesses could not identify -------------------
+
+    def search_batch(self, limit: int | None = None) -> int:
+        """Second chance for accounts whose username could not be guessed.
+
+        WHAT THIS IS FOR, IN NUMBERS. Measured over the whole index on
+        2026-09-12: the guessing pass identified 4,487 of 6,402 accounts,
+        70.1%. The 1,915 it could not reach are not accounts it failed at --
+        they are accounts whose username is not derivable from the input.
+        `sophia-locke` is `thesophialocke` on the platform, and no
+        transformation of the slug produces that.
+
+        TWO SOURCES, CHEAPEST FIRST, and very different in cost:
+
+        1. **An archive that publishes the link.** porn4fans puts a
+           performer's OnlyFans in the social row of their model page, and
+           its site search finds performers this index carries no source for
+           -- `Megan Guthrie` is `megnut` there, which no guess reaches.
+           Requests to a host the add-on already crawls, no rate limit worth
+           the name. This is what actually works.
+        2. **A search engine**, for the rest. Measured from this deployment
+           it contributes almost nothing -- the engines refuse it -- so it is
+           a cheap extra rather than the plan. See `discover.py`.
+
+        Both produce CANDIDATE USERNAMES and nothing more, and both pass two
+        separate tests before anything is written: onlyfans.com must confirm
+        the username exists, and `discover.matches` must confirm it is THIS
+        performer's. The second is not optional -- without it the archive
+        search stamped Holly Brougham with a stranger's account, avatar and
+        bio, measured 19 times in 40.
+
+        Returns accounts attempted. A miss is the normal outcome here -- most
+        of this tail genuinely has no OnlyFans account to find.
+        """
+
+        from onlyfans_addon.registry import registry
+
+        if not self.settings.onlyfans_enrich:
+            # The whole point of a username is the profile it unlocks. With
+            # the profile pass off nothing stamps `of_checked_at` either, so
+            # this pass would have no eligible accounts anyway -- gating it
+            # explicitly says so rather than leaving it to look like a bug.
+            return 0
+
+        limit = limit or self.settings.search_batch_size
+        scrapers = registry().services
+
+        with db_session() as session:
+            pending = (
+                session.execute(
+                    select(OnlyFansAccount)
+                    # Guessed, definitively answered, and still unidentified.
+                    # `of_checked_at IS NOT NULL` is what keeps this off
+                    # accounts the first pass has not finished with, and
+                    # `of_searched_at IS NULL` is what stops it circling the
+                    # same tail forever.
+                    .where(
+                        OnlyFansAccount.of_checked_at.is_not(None),
+                        OnlyFansAccount.of_username.is_(None),
+                        OnlyFansAccount.of_searched_at.is_(None),
+                    )
+                    .order_by(
+                        OnlyFansAccount.saved.desc(),
+                        OnlyFansAccount.source_count.desc(),
+                    )
+                    .limit(limit)
+                )
+                .scalars()
+                .all()
+            )
+            account_ids = [account.id for account in pending]
+
+        attempted = 0
+
+        for account_id in account_ids:
+            try:
+                if self._search_one(account_id, scrapers):
+                    attempted += 1
+            except Exception as exc:
+                logger.debug(f"OnlyFans: username search failed: {exc}")
+
+        return attempted
+
+    def _search_one(self, account_id: int, scrapers: dict) -> bool:
+        from onlyfans_addon import discover
+
+        with db_session() as session:
+            account = session.get(OnlyFansAccount, account_id)
+
+            if account is None:
+                return False
+
+            handle = account.handle
+            display = account.display_name
+
+            # `(username, the page it was found on)`. The second half is the
+            # evidence and it has to survive to the identity check -- a
+            # username on its own cannot be judged once the guest API has
+            # confirmed it exists, because existing is exactly what a
+            # stranger's account also does.
+            pairs = discover.archive_candidates(display, handle, scrapers)
+            searched = False
+
+            if not pairs and self.settings.onlyfans_search:
+                searched = True
+                # A search result has no slug to weigh, so its own text is
+                # the evidence -- which in practice means it passes the
+                # identity check only when the confirmed profile is named
+                # after this performer. That is the strictest of the two
+                # routes, and deliberately so for the least trustworthy
+                # source.
+                pairs = [
+                    (name, "") for name in discover.usernames(display, handle)
+                ]
+
+            if not pairs:
+                # Nothing to check. Stamp only if this really is an answer
+                # about this performer: the archives were asked and had
+                # nothing, and any search that ran actually reached an
+                # engine. An engine standing down is somebody else's rate
+                # limit, and stamping that would write the account off
+                # permanently for it.
+                if not searched or discover.answered():
+                    account.of_searched_at = utcnow()
+                    session.commit()
+
+                return True
+
+            evidence = dict(pairs)
+
+            def accept(candidate: str, data: dict) -> bool:
+                ok = discover.matches(
+                    handle,
+                    display,
+                    evidence.get(candidate, ""),
+                    data.get("display_name") or data.get("name") or "",
+                )
+
+                if not ok:
+                    logger.debug(
+                        f"OnlyFans discover: rejected {candidate} for "
+                        f"{handle} -- belongs to "
+                        f"{data.get('display_name') or data.get('name')!r}"
+                    )
+
+                return ok
+
+            definitive = self._apply_onlyfans_profile(
+                account, [name for name, _ in pairs], accept=accept
+            )
+
+            if definitive:
+                account.of_searched_at = utcnow()
+
+            session.commit()
+            return True
+
     # --- The performer's own profile ----------------------------------------
 
     #: Candidates tried per account before giving up. Each is one request, and
@@ -920,8 +1078,29 @@ class OnlyFansService:
 
         return seen[: self._MAX_CANDIDATES]
 
-    def _apply_onlyfans_profile(self, account: OnlyFansAccount) -> None:
+    def _apply_onlyfans_profile(
+        self,
+        account: OnlyFansAccount,
+        candidates: list[str] | None = None,
+        accept: Callable[[str, dict], bool] | None = None,
+    ) -> bool:
         """Fill the account from onlyfans.com. Never raises.
+
+        `candidates` overrides the guesses, which is how the fallback pass
+        reuses this: a username mined from an archive page or a search result
+        is ONE MORE CANDIDATE and nothing else. It goes through the same guest
+        API, is believed only if onlyfans.com confirms it, and writes through
+        the same code below -- so no reader anywhere has to know where a
+        username came from.
+
+        `accept` is the second test, and only the fallback needs it. A guessed
+        username is built out of this account's own handle, so confirming it
+        exists confirms it is theirs. A username taken off somebody's web page
+        is not: the fallback's candidates include real accounts belonging to
+        other people, and this is where such a candidate is rejected AFTER the
+        profile came back and BEFORE a single field is written. Returning
+        False makes it a miss like any other -- the next candidate still gets
+        its turn.
 
         The stamp is the subtle part. `of_checked_at` means "asked and
         answered", so it is written for a hit and for a definitive 404 -- but
@@ -929,6 +1108,9 @@ class OnlyFansService:
         rotation looks like a miss from here, and stamping those would
         permanently write off every account the pass happened to reach during
         the outage.
+
+        Returns whether the answer was definitive, so the caller can apply the
+        same rule to its own stamp.
         """
 
         from onlyfans_addon import profile as of_profile
@@ -937,10 +1119,19 @@ class OnlyFansService:
         definitive = False
 
         try:
-            for candidate in self._of_candidates(account):
+            for candidate in (
+                self._of_candidates(account) if candidates is None else candidates
+            ):
                 outcome, data = of_profile.profile(candidate)
 
                 if outcome == "ok" and data:
+                    if accept is not None and not accept(candidate, data):
+                        # A real account, but not this performer's. Treated
+                        # exactly as a 404 would be: this candidate is wrong,
+                        # the question has still been answered.
+                        definitive = True
+                        continue
+
                     found = data
                     definitive = True
                     break
@@ -956,13 +1147,16 @@ class OnlyFansService:
                 break
         except Exception as exc:
             logger.debug(f"OnlyFans: profile lookup failed for {account.handle}: {exc}")
-            return
+            return False
 
-        if definitive:
+        if definitive and candidates is None:
+            # Only the first pass owns `of_checked_at`. The fallback has its
+            # own stamp and must not touch this one, or a re-run of the
+            # guesses would look as though it had already happened.
             account.of_checked_at = utcnow()
 
         if not found:
-            return
+            return definitive
 
         # The picture and the bio OVERWRITE what an archive site lent us --
         # that is the whole point of the pass -- but never overwrite a
@@ -996,6 +1190,8 @@ class OnlyFansService:
         logger.debug(
             f"OnlyFans: profile matched {account.handle} -> {found['of_username']}"
         )
+
+        return True
 
 
 #: An unfinished run older than this is treated as abandoned rather than in
@@ -1242,6 +1438,20 @@ def scheduled_enrich() -> None:
         service.enrich_batch()
     except Exception as exc:
         logger.error(f"OnlyFans account enrichment failed: {exc}")
+
+
+def scheduled_search() -> None:
+    """Second chance at the usernames the guesses could not reach."""
+
+    service = _shared()
+
+    if not service.initialized:
+        return
+
+    try:
+        service.search_batch()
+    except Exception as exc:
+        logger.error(f"OnlyFans username search failed: {exc}")
 
 
 def scheduled_stats() -> None:
