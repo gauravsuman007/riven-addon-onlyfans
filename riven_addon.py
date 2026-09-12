@@ -19,9 +19,9 @@ service find them. Do not make these imports lazy to save startup time.
 
 from pathlib import Path
 
-from program.addons import Addon, AddonManifest, AddonNav
+from program.addons import Addon, AddonManifest, AddonNav, AddonTv
 
-from onlyfans_addon import config, profile, registry, router, service
+from onlyfans_addon import config, profile, registry, router, service, tv
 from onlyfans_addon.models import metadata as onlyfans_metadata
 from onlyfans_addon.settings import OnlyFansModel
 
@@ -39,7 +39,12 @@ class OnlyFansAddon(Addon):
             "those sites and profiles read from OnlyFans itself."
         ),
         version="1.0.0",
-        nav=AddonNav(label="OnlyFans", icon="users", tv=False),
+        nav=AddonNav(label="OnlyFans", icon="users", tv=True),
+        # A screen of its own on the television: the performer grid, one
+        # performer's videos, and playback. No `title` -- this add-on knows
+        # nothing about a library item, so it has nothing to contribute to
+        # one's page.
+        tv=AddonTv(browse=True),
     )
 
     def settings_model(self):
@@ -52,6 +57,21 @@ class OnlyFansAddon(Addon):
         return HERE / "onlyfans_addon" / "migrations" / "versions"
 
     def router(self):
+        """One router, with the television's routes mounted inside it.
+
+        Mounted here rather than returned separately so the host keeps a
+        single mount point per add-on: everything this add-on serves lives
+        under `/api/v1/x/onlyfans/`, which is also the prefix `riven-tv`
+        refuses to let a stream path escape from.
+        """
+
+        # Idempotent. `router()` is called once per load today, but mounting
+        # is a side effect and a second call would duplicate every television
+        # route -- which FastAPI accepts silently and answers from whichever
+        # it matches first.
+        if not any(getattr(route, "path", "").startswith("/tv/") for route in router.router.routes):
+            router.router.include_router(tv.router)
+
         return router.router
 
     def jobs(self):
