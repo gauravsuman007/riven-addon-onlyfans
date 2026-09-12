@@ -46,7 +46,7 @@ from onlyfans_addon.models import (
     OnlyFansAccountSource,
     OnlyFansSyncRun,
 )
-from program.services.scraper_plugins.base import BROWSER_HEADERS
+from onlyfans_addon.scraper_api.base import BROWSER_HEADERS
 from onlyfans_addon.service import OnlyFansService, normalise_handle
 from onlyfans_addon.service import STALE_AFTER
 from onlyfans_addon.registry import registry as of_registry
@@ -1116,7 +1116,7 @@ async def import_plugins(
             staged = Path(staging) / name
             staged.write_bytes(payload)
 
-            from program.services.scraper_plugins.plugins import discover_plugins
+            from onlyfans_addon.scraper_api.plugins import discover_plugins
 
             found = discover_plugins(staging)
 

@@ -155,3 +155,49 @@ discover after the fact:
 For galleries, also check how many images a *signed-out* request really gets,
 against the count the gallery advertises. That gap is how the image feature
 turned out to be much thinner than the album listings suggest.
+
+## The scraper contract is vendored here
+
+`onlyfans_addon/scraper_api/` holds `DirectScraper`, the VPN-routed session,
+the result models and the plugin loader. It is a **copy**: the canonical one
+is in riven-addon-tubescraper, which writes scrapers against the same
+contract. Neither add-on may import the other -- either can be disabled or
+removed underneath it -- and the host owns no scraper code at all.
+
+To change the contract, edit it there and run:
+
+    ./scripts/sync-scraper-api.sh ../riven-addon-tubescraper
+
+**Never hand-edit this copy.** `_RoutedSession` is where the VPN proxy is
+applied, so a divergence between the copies fails nothing visibly -- it just
+sends this add-on's scraper traffic out of the wrong address, which is the
+entire thing VPN routing exists to prevent. `scraper_api/drift.py` compares
+the copies on the deployed machine, where both live under `/riven/addons`,
+and `tests/test_onlyfans_addon.py` calls it.
+
+## Running the tests
+
+    docker exec riven-tpdb env PYTHONPATH=/riven/src:/riven/addons/onlyfans \
+      /riven/.venv/bin/python /riven/addons/onlyfans/tests/test_onlyfans_addon.py
+
+    cd ui && npm install && npm run build && npm run smoke
+
+`ui/addon.js` is **committed build output** -- the host serves it and builds
+nothing, so editing `ui/src/` without rebuilding ships the previous bundle
+and everything looks fine.
+
+## The bug the UI smoke test now guards
+
+Opening a site on a performer's page fetched its videos, threw them away and
+fetched again, forever. The effect that resets the list on a Videos/Images
+change called `more()`, and `more()` READS `loading`, `done` and `page` --
+the same state the effect WRITES, so every write re-ran it.
+
+Nothing errored. Measured against the live server: twenty-five identical
+`?site=notfans&page=1` requests, every one a 200, and not one video rendered.
+From the outside that is indistinguishable from a site that has nothing,
+which is how it was reported. The reset and fetch are now `untrack`ed.
+
+The smoke test never opened a site, which is the gap it came through. It does
+now, and asserts the request COUNT as well as the render -- "it rendered"
+alone would pass while looping.

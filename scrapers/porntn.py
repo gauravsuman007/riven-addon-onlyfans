@@ -19,7 +19,7 @@ from urllib.parse import urljoin, urlparse, urlunparse
 from loguru import logger
 from lxml import html as lxml_html
 
-from program.services.scraper_plugins.base import (
+from onlyfans_addon.scraper_api.base import (
     DirectAccount,
     DirectScraper,
     DirectSource,

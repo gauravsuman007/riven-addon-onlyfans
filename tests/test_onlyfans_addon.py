@@ -1,0 +1,122 @@
+"""Checks for this add-on's half of the scraper contract.
+
+A plain script with a local `check()` harness, like the host's suites, not
+pytest. It prints `SKIP:` and exits 0 when its dependencies are absent, so
+running it on a laptop is harmless; run it where they exist:
+
+    docker exec riven-tpdb env PYTHONPATH=/riven/src:/riven/addons/onlyfans \
+      /riven/.venv/bin/python /riven/addons/onlyfans/tests/test_onlyfans_addon.py
+
+This file exists because the add-on gained a vendored copy of the scraper
+ABI. The host owns no scraper code at all now, so the guards that used to sit
+in the host's `test_vpn.py` have to live with each copy -- and a copy nobody
+checks is exactly how the thing they guard against comes back.
+"""
+
+import sys
+from pathlib import Path
+
+# The add-on is not an installed package: the host puts its folder on the path
+# only while `riven_addon.py` runs. A test invoked directly does the same for
+# itself, or every import below fails and it looks like the add-on is broken
+# rather than the test being run oddly.
+ROOT = Path(__file__).resolve().parent.parent
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+try:
+    from onlyfans_addon.scraper_api import drift
+    from onlyfans_addon.scraper_api.plugins import discover_plugins
+except ModuleNotFoundError as exc:
+    print(f"SKIP: {exc.name} is not installed; run this inside the riven-tpdb container")
+    sys.exit(0)
+
+
+PASS = FAIL = 0
+
+
+def check(name, condition, extra=""):
+    global PASS, FAIL
+    if condition:
+        PASS += 1
+        print(f"  ok   {name}")
+    else:
+        FAIL += 1
+        print(f"  FAIL {name} {extra}")
+
+
+# --- the scrapers this add-on ships -----------------------------------------
+#
+# If this folder stops loading, the add-on is present, its page renders and
+# its API answers -- and every performer shows no content at all.
+
+bundled = discover_plugins(str(ROOT / "scrapers"))
+
+check(
+    f"the bundled scrapers all load ({len(bundled.plugins)} found)",
+    len(bundled.plugins) >= 5,
+    f"found {len(bundled.plugins)}",
+)
+check("no bundled scraper fails to import", bundled.errors == {}, str(bundled.errors))
+check(
+    "every bundled scraper indexes accounts",
+    all(getattr(p.scraper, "indexes_accounts", False) for p in bundled.plugins.values()),
+)
+
+
+# --- the scraper ABI --------------------------------------------------------
+
+
+def test_every_scraper_request_goes_through_the_routed_session():
+    """Guard the session-level hook, in this add-on's own copy.
+
+    Applying the proxy in a scraper's `_get` helper looks equivalent and is
+    not: a scraper calling `self.session.head` directly to probe a rendition
+    would send that one request around the tunnel while everything else went
+    through it. The scraper still works and the video still plays, so nothing
+    looks wrong -- only the exit address is.
+    """
+
+    text = (ROOT / "onlyfans_addon" / "scraper_api" / "base.py").read_text()
+
+    check(
+        "scrapers route through _RoutedSession, not a plain requests.Session",
+        "class _RoutedSession(requests.Session)" in text
+        and "def request(self, method, url, **kwargs)" in text
+        and "self.session = _RoutedSession()" in text,
+    )
+    check(
+        "the VPN is asked per purpose, so routing can fail closed",
+        "from program.services.vpn import SCRAPING, vpn" in text,
+    )
+
+
+def test_the_vendored_copies_have_not_drifted():
+    """This copy must be identical to every other add-on's.
+
+    Skips when no other add-on is installed, which is legitimate. On the
+    deployed server both live under /riven/addons and this compares them for
+    real -- which is the only place the question can actually be answered,
+    since the two copies live in two repositories.
+    """
+
+    others = drift.siblings()
+
+    if not others:
+        print("  --   no other add-on installed; nothing to compare against")
+        return
+
+    problems = drift.compare()
+
+    check(
+        f"the scraper ABI matches the copy in {', '.join(others)}",
+        not problems,
+        "; ".join(problems),
+    )
+
+
+test_every_scraper_request_goes_through_the_routed_session()
+test_the_vendored_copies_have_not_drifted()
+
+print(f"\n{PASS} passed, {FAIL} failed")
+sys.exit(1 if FAIL else 0)
