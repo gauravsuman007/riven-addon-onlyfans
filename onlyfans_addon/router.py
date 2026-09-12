@@ -537,6 +537,20 @@ async def image(
         status_code = upstream.status_code
         await upstream.aclose()
         await client.aclose()
+
+        """
+        A rejected RANGE is passed through as itself, not rebranded a 502.
+
+        416 means the offset is past the end of this file, and a player told
+        so re-requests from a valid one. A player told 502 treats it as
+        transient and retries the SAME request -- forever, which is what
+        endless buffering in an external player actually is.
+        """
+        if status_code == 416:
+            raise HTTPException(
+                status_code=416, detail="That part of the video is past its end"
+            )
+
         raise HTTPException(status_code=502, detail=f"Upstream returned {status_code}")
 
     headers = {
@@ -948,6 +962,20 @@ async def stream(
         status_code = upstream.status_code
         await upstream.aclose()
         await client.aclose()
+
+        """
+        A rejected RANGE is passed through as itself, not rebranded a 502.
+
+        416 means the offset is past the end of this file, and a player told
+        so re-requests from a valid one. A player told 502 treats it as
+        transient and retries the SAME request -- forever, which is what
+        endless buffering in an external player actually is.
+        """
+        if status_code == 416:
+            raise HTTPException(
+                status_code=416, detail="That part of the video is past its end"
+            )
+
         raise HTTPException(status_code=502, detail=f"Upstream returned {status_code}")
 
     response_headers = {
