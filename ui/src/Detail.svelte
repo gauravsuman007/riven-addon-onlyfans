@@ -9,6 +9,13 @@
     let failed = $state(false);
     let mode = $state("videos");
     let opened = $state(new Set());
+    /*
+        Collapsed until asked, because an OnlyFans bio is 20-40 lines of
+        marketing copy and `.ofx-bio` honours every line break in it. Left
+        open, the header card is a full screen of text and the site buttons
+        are below the fold.
+    */
+    let bioOpen = $state(false);
 
     /*
         Only used when there is no host player to hand the video to.
@@ -39,9 +46,11 @@
     */
     const stats = $derived(
         [
+            // OnlyFans' own order on a profile, which is the page this one
+            // is meant to read as.
+            ["posts", account?.posts_count],
             ["photos", account?.photos_count],
             ["videos", account?.videos_count],
-            ["posts", account?.posts_count],
             ["likes", account?.likes_count]
         ].filter(([, value]) => value != null)
     );
@@ -129,9 +138,9 @@
     <header class="ofx-header">
         <!--
             The banner is the performer's own onlyfans.com header and is absent
-            far more often than not, so it is a layer behind the identity block
-            rather than a slot in it: with no banner the header closes up
-            instead of leaving a hole.
+            far more often than not, which is why it is conditional rather than
+            a fixed slot: with no banner the card closes up instead of leaving
+            a hole, and the avatar simply stops overlapping.
         -->
         {#if account.header_url}
             <div class="ofx-banner">
@@ -139,8 +148,13 @@
             </div>
         {/if}
 
-        <div class="ofx-identity" class:ofx-overlap={!!account.header_url}>
-            <div class="ofx-avatar">
+        <!--
+            Only the avatar is lifted into the banner. The whole block used to
+            be, which put the name -- a clamp() that reaches 2.75rem -- over
+            the artwork with nothing but the banner's gradient behind it.
+        -->
+        <div class="ofx-identity">
+            <div class="ofx-avatar" class:ofx-overlap={!!account.header_url}>
                 <Poster
                     src={account.avatar_url}
                     alt={account.display_name}
@@ -170,7 +184,13 @@
                 </p>
 
                 {#if account.bio}
-                    <p class="ofx-bio">{account.bio}</p>
+                    <p class="ofx-bio" class:ofx-clamped={!bioOpen}>{account.bio}</p>
+                    <button
+                        class="ofx-more"
+                        type="button"
+                        onclick={() => (bioOpen = !bioOpen)}>
+                        {bioOpen ? "less" : "more"}
+                    </button>
                 {/if}
 
                 {#if stats.length}
@@ -198,13 +218,11 @@
                 </div>
             </div>
         </div>
-    </header>
 
-    <div class="ofx-controls">
-        <div class="ofx-toggle">
+        <div class="ofx-tabs">
             {#each ["videos", "images"] as option (option)}
                 <button
-                    class="ofx-btn"
+                    class="ofx-tab"
                     class:ofx-on={mode === option}
                     type="button"
                     onclick={() => (mode = option)}>
@@ -212,7 +230,9 @@
                 </button>
             {/each}
         </div>
+    </header>
 
+    <div class="ofx-controls">
         <span class="ofx-note">Load from:</span>
         {#each account.sources as source (source.site)}
             <button

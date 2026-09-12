@@ -18,7 +18,21 @@
     --ofx-fg: var(--foreground, #fafafa);
     --ofx-muted: var(--muted-foreground, #a1a1aa);
     --ofx-line: rgba(255, 255, 255, 0.1);
+    /*
+        A 4% tint. Correct for a control that sits on the page background and
+        wrong for anything that has to HIDE what is behind it -- see
+        `--ofx-surface`.
+    */
     --ofx-panel: rgba(255, 255, 255, 0.04);
+    /*
+        A real surface, not a tint, and the reason the header stopped rendering
+        its text on top of the performer's banner. `--ofx-panel` is 4% white:
+        over the page background it reads as a panel, but it covers nothing, so
+        the identity block had no ground of its own and depended entirely on
+        the banner's gradient to stay legible. The host's `--card` is opaque
+        and themed; the fallback is too.
+    */
+    --ofx-surface: var(--card, #141417);
     --ofx-accent: #38bdf8;
 
     color: var(--ofx-fg);
@@ -26,9 +40,18 @@
     font-size: 14px;
 }
 
+/*
+    THE TOP PADDING CLEARS THE HOST'S HEADER, which is `absolute top-0 h-20`
+    and therefore reserves no space of its own. Every host page clears it with
+    `PageShell`; an add-on page is mounted into a bare div and gets none of
+    that, so without this the first ~56px of whatever renders first -- here the
+    performer's banner -- sits under the search pill and its black gradient.
+
+    Only at the breakpoint, because the host hides that header below `md`.
+*/
 @media (min-width: 768px) {
     .ofx {
-        padding: 1.5rem 4rem 4rem;
+        padding: 5.5rem 4rem 4rem;
     }
 }
 
@@ -152,19 +175,23 @@
     border: 1px solid var(--ofx-line);
     border-radius: 1rem;
     overflow: hidden;
-    background: var(--ofx-panel);
+    background: var(--ofx-surface);
     margin-bottom: 1.75rem;
 }
 
+/*
+    THE BANNER IS SIZED BY RATIO, NOT BY A HEIGHT.
+
+    It used to be a fixed 8rem/11rem strip with `object-fit: cover`, which on a
+    wide viewport showed roughly a tenth of an OnlyFans header -- a slice of
+    artwork with no subject in it. OnlyFans headers are about 3:1, so that is
+    what this asks for, and `max-height` keeps a tall window from handing the
+    banner half the screen.
+*/
 .ofx-banner {
     position: relative;
-    height: 8rem;
-}
-
-@media (min-width: 768px) {
-    .ofx-banner {
-        height: 11rem;
-    }
+    aspect-ratio: 3 / 1;
+    max-height: 20rem;
 }
 
 .ofx-banner img {
@@ -174,23 +201,36 @@
     display: block;
 }
 
+/*
+    A short fade into the card below it, and nothing else. It used to be the
+    only thing keeping the identity block legible, which made legibility a
+    function of the banner's height: stretch the gradient and its per-pixel
+    opacity collapses. Text no longer overlaps the banner at all -- see
+    `.ofx-identity` -- so this is a seam, not a scrim.
+*/
 .ofx-banner::after {
     content: "";
     position: absolute;
-    inset: 0;
-    background: linear-gradient(to top, var(--ofx-bg), transparent 70%);
+    inset: auto 0 0;
+    height: 3rem;
+    background: linear-gradient(to top, var(--ofx-surface), transparent);
 }
 
+/*
+    ONLY THE AVATAR OVERLAPS THE BANNER.
+
+    The whole identity block used to be pulled up `-3rem`, which put the name
+    -- a `clamp()` that reaches a 2.75rem font -- and the top of the avatar
+    over the artwork. That is the "text on top of the picture" this page was
+    reported for, and tuning the offset only moves which viewport widths it
+    happens at. OnlyFans overlaps the avatar and nothing else, so the text has
+    an opaque ground by construction.
+*/
 .ofx-identity {
     display: flex;
     flex-wrap: wrap;
     gap: 1.25rem;
     padding: 1.25rem;
-}
-
-.ofx-identity.ofx-overlap {
-    margin-top: -3rem;
-    position: relative;
 }
 
 .ofx-avatar {
@@ -199,8 +239,16 @@
     flex: none;
     border-radius: 9999px;
     overflow: hidden;
-    border: 1px solid rgba(255, 255, 255, 0.15);
+    /* Thick enough to read as OnlyFans' ring rather than a hairline, and in
+       the card's own colour so it cuts the avatar out of the banner. */
+    border: 4px solid var(--ofx-surface);
     background: #18181b;
+}
+
+/* Half the avatar's height, matching OnlyFans' proportion. Applied to the
+   avatar rather than its row so nothing else is lifted with it. */
+.ofx-avatar.ofx-overlap {
+    margin-top: -3rem;
 }
 
 .ofx-avatar img {
@@ -210,11 +258,40 @@
     display: block;
 }
 
+/*
+    CLAMPED, AND THAT IS NOT COSMETIC. An OnlyFans bio is 20-40 lines of
+    marketing copy with a line break between each one, and `pre-line` honours
+    every one of them: unclamped, the header card became a full screen of text
+    and pushed the site buttons and all of the content below the fold.
+*/
 .ofx-bio {
     margin: 0.5rem 0 0;
     max-width: 44rem;
     color: var(--ofx-muted);
     white-space: pre-line;
+}
+
+.ofx-bio.ofx-clamped {
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 3;
+    line-clamp: 3;
+    overflow: hidden;
+}
+
+.ofx-more {
+    border: 0;
+    background: none;
+    padding: 0;
+    margin-top: 0.35rem;
+    color: var(--ofx-accent);
+    font: inherit;
+    font-size: 0.75rem;
+    cursor: pointer;
+}
+
+.ofx-more:hover {
+    text-decoration: underline;
 }
 
 .ofx-stats,
@@ -248,6 +325,42 @@
     vertical-align: middle;
 }
 
+/*
+    The videos/images switch, as a tab strip on the card rather than a pill
+    floating above the content -- which is where OnlyFans puts the same choice,
+    and it reads as belonging to this performer instead of to the page.
+*/
+.ofx-tabs {
+    display: flex;
+    gap: 0.25rem;
+    padding: 0 1.25rem;
+    border-top: 1px solid var(--ofx-line);
+}
+
+.ofx-tab {
+    border: 0;
+    background: none;
+    color: var(--ofx-muted);
+    font: inherit;
+    font-size: 0.8125rem;
+    text-transform: capitalize;
+    padding: 0.75rem 0.5rem;
+    cursor: pointer;
+    /* Transparent rather than absent: a border that appears on selection
+       would shift the row by 2px every time the tab changed. */
+    border-bottom: 2px solid transparent;
+    margin-bottom: -1px;
+}
+
+.ofx-tab:hover {
+    color: var(--ofx-fg);
+}
+
+.ofx-tab.ofx-on {
+    color: var(--ofx-fg);
+    border-bottom-color: var(--ofx-accent);
+}
+
 /* --- controls ---------------------------------------------------------- */
 
 .ofx-controls {
@@ -256,14 +369,6 @@
     align-items: center;
     gap: 0.75rem;
     margin-bottom: 1.5rem;
-}
-
-.ofx-toggle {
-    display: flex;
-    border: 1px solid var(--ofx-line);
-    background: var(--ofx-panel);
-    border-radius: 9999px;
-    padding: 0.2rem;
 }
 
 .ofx-btn {
