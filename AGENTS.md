@@ -320,3 +320,79 @@ the household's network and, when streaming is routed, from the far end of the
 tunnel. Only a leading `www.` label is tolerated (porn4fans serves stills from
 `www.` while its `base_url` is bare); a suffix comparison would admit
 `porn4fans.com.attacker.net`.
+
+## A screen's shape is data, or one surface falls behind
+
+The rails were added to `ui/src/Grid.svelte` as five literal components and
+`tv/browse` was not touched. Nothing failed -- the web page and the television
+each drew a correct screen, a version apart, and there is no test that can see
+that while the definition is duplicated.
+
+`onlyfans_addon/rails.py` is now the one list, served at `GET /rails`. The web
+page renders one `Rail` per entry; `tv/browse` builds one section per entry.
+**Add a rail by adding a tuple**, and both surfaces have it on the next load
+with no build of either. `tests/test_onlyfans_addon.py` asserts that
+`tv_browse` walks `RAILS` and that no rail heading appears as a string literal
+inside `tv.py` -- the check reads the parsed tree, not the raw source, so a
+comment mentioning Trending is fine and a hard-coded heading is not.
+
+The same rule is the answer for anything else that grows a second renderer.
+
+## The avatar, the banner, and stacking order
+
+Two separate bugs, both reported as "overlap":
+
+- **`.ofx-banner` is positioned and `.ofx-avatar` was not.** Within one
+  stacking context a positioned element paints over a static one whatever the
+  document order, so the avatar's negative margin lifted it into the banner
+  and the banner painted straight back over the lifted half. The avatar is
+  `position: relative; z-index: 1` now. Anything else that has to sit above
+  the banner needs the same.
+- **A fixed banner height with `object-fit: cover` crops hard.** An 8rem strip
+  across a 1200px card shows a 9:1 slice of a 3:1 picture. OnlyFans serves
+  headers at 3:1, so the box is `aspect-ratio: 3 / 1` and nothing is cropped.
+  **Do not add `max-height` back**: `aspect-ratio` plus a cap does not crop,
+  it narrows the element, which is the empty strip to the right of the banner
+  that was reported two fixes before this one.
+
+## Identifying a performer is two questions, not one
+
+`profile.py` answers "does this username exist" -- a handle that is not an
+account 404s, which is the whole reason the guest API is trusted to write to
+the index. It does **not** answer "is this account this performer's", and for
+a guessed username that did not matter, because the guess was built out of the
+account's own handle.
+
+`discover.py` changes that. It takes usernames off other people's web pages:
+the archive's site search for "Holly Brougham" returns Holly *and* several
+unrelated models, and every one of those has a real OnlyFans username on it.
+Measured on 40 accounts: 29 usernames confirmed to exist, **19 of them
+strangers'**. The pass had stamped Holly Brougham with `alannasworldx`,
+complete with the wrong woman's avatar and bio.
+
+`discover.matches` is the second question and it is deliberately strict: the
+archive's slug must flatten to our handle, or the confirmed profile must be
+named after this performer. A prefix rule takes `milla` for `millaroyce`; a
+contains rule takes far worse. **Never loosen it to raise the hit rate.** An
+unidentified account keeps the picture an archive lent it and looks
+unremarkable; a wrongly identified one wears another woman's face under this
+performer's name, permanently, and nothing downstream has any reason to doubt
+it.
+
+Anything that reaches `_apply_onlyfans_profile` with a `candidates` list MUST
+pass an `accept` callback.
+
+## The search engines do not work from this host
+
+Measured 2026-09-12 from the deployment: DuckDuckGo answered two queries and
+then served its anomaly page (HTTP 202) to everything for a long while, Mojeek
+answered a captcha page, and Bing answers but carries no onlyfans.com links
+for these queries at all. The engine half of `discover.py` therefore
+contributes close to nothing today; **the archive half is doing the work**.
+
+It is kept because it costs nothing when the engines refuse, and because the
+identity check above makes a bad engine result harmless. Do not "fix" it by
+working around a challenge page -- that is a bot filter, and a challenge is
+the engine declining. The account is left unstamped so it comes round again.
+If this needs to actually work, it needs a keyed search API, not a cleverer
+scrape.

@@ -139,6 +139,39 @@ of them is worth trying again.
 A card with no `id` cannot be pressed and one with no `title` cannot be read;
 either is dropped.
 
+## Keeping a surface from falling a version behind
+
+The contract above says how an add-on answers. It does not stop the add-on
+*forgetting* to — and that is the failure that actually happened here.
+
+Five recommendation rails were added to this add-on's web page, written into
+`Grid.svelte` as five literal components. `tv/browse` went on answering with
+the flat grid it had always answered with. **Nothing failed.** Both surfaces
+drew a correct screen, a version apart, and no test can catch that while the
+definition is duplicated: each copy is internally consistent.
+
+So define a screen's shape as **data in one place**, and render both surfaces
+from it. Here that is `onlyfans_addon/rails.py`, served at `/rails`:
+
+```python
+RAILS = (
+    Rail("trending", "Trending", "fastest growing this week"),
+    ...
+    Rail("random", "Something else", tv=False),
+)
+```
+
+The web page fetches `/rails` and renders one row per entry; `tv/browse`
+builds one section per entry. Adding a rail is one tuple and both surfaces
+gain it on the next load, with no build of either. `tv=False` is reported, not
+applied — whether a remote control suits a row is a fact about the row, and
+honouring it is the renderer's business.
+
+The suite then asserts what a person would otherwise have to remember:
+`tv_browse` walks the shared list, and names no heading of its own. That is
+what turns "the television is behind" from something nobody notices into a
+failing test.
+
 ## What the television checks rather than trusts
 
 An add-on is third-party code the viewer installed from a git URL, and its
