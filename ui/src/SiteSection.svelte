@@ -1,4 +1,6 @@
 <script>
+    import { untrack } from "svelte";
+
     import { accountVideos, accountGalleries } from "./api.js";
     import Poster from "./Poster.svelte";
 
@@ -38,14 +40,36 @@
     }
 
     $effect(() => {
-        // Re-runs when the Videos/Images toggle moves, which is a different
-        // list entirely rather than more of this one.
+        // The dependencies, read deliberately and in full: the Videos/Images
+        // toggle is a different list entirely rather than more of this one,
+        // and the section is reused across handles and sites.
         mode;
-        items = [];
-        page = 0;
-        done = false;
-        failed = false;
-        more();
+        handle;
+        site;
+
+        /*
+            EVERYTHING ELSE IS UNTRACKED, AND THAT IS THE WHOLE POINT.
+
+            `more()` READS `loading`, `done` and `page` -- and this effect
+            WRITES all three. Tracked, that is a loop: the effect runs, resets
+            the list, fetches, writes state, and the write re-triggers the
+            effect, which resets the list again. The request succeeds every
+            time, so there is no error anywhere; the results are simply thrown
+            away by the next pass before they can render.
+
+            Observed against the live server: twenty-five identical
+            `?site=notfans&page=1` requests, every one a 200, and not one
+            video on the page. It reads as "scraping returns nothing", which
+            is the opposite of what is happening.
+        */
+        untrack(() => {
+            items = [];
+            page = 0;
+            done = false;
+            failed = false;
+            loading = false;
+            more();
+        });
     });
 
     function duration(seconds) {

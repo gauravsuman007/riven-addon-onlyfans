@@ -20,7 +20,10 @@ const dom = new JSDOM("<!doctype html><body><div id=root></div></body>", {
     pretendToBeVisual: true
 });
 
-for (const key of ["window", "document", "Node", "Text", "Comment", "DocumentFragment", "Element", "HTMLElement", "Event", "CustomEvent", "requestAnimationFrame", "cancelAnimationFrame", "getComputedStyle", "MutationObserver"]) {
+// HTMLMediaElement and friends matter: Svelte 5 feature-tests against them
+// while mounting, and a missing one throws a ReferenceError from inside
+// the framework that looks nothing like the component at fault.
+for (const key of ["window", "document", "Node", "Text", "Comment", "DocumentFragment", "Element", "HTMLElement", "HTMLMediaElement", "HTMLImageElement", "HTMLVideoElement", "HTMLInputElement", "HTMLButtonElement", "HTMLAnchorElement", "Event", "CustomEvent", "requestAnimationFrame", "cancelAnimationFrame", "getComputedStyle", "MutationObserver", "CSS"]) {
     try {
         globalThis[key] = dom.window[key];
     } catch {
@@ -42,7 +45,18 @@ globalThis.fetch = async (url) => {
     return {
         ok: true,
         json: async () =>
-            String(url).includes("/accounts/")
+            String(url).includes("/videos")
+                ? [
+                      {
+                          site: "hornyfap",
+                          video_id: "v1",
+                          title: "A Clip",
+                          thumbnail: "http://x/t.jpg",
+                          duration: 125,
+                          page_url: "http://x/1"
+                      }
+                  ]
+                : String(url).includes("/accounts/")
                 ? {
                       handle: "demo",
                       display_name: "Demo Person",
@@ -95,6 +109,29 @@ console.log("detail verified badge:", detail.includes("ofx-verified"));
 console.log("detail profile link:", detail.includes("onlyfans.com/demo"));
 console.log("detail stats:", detail.includes("photos") && detail.includes("likes"));
 console.log("detail site button:", detail.includes("hornyfap"));
+
+/*
+    OPENING A SITE, which is where the content actually comes from.
+
+    This was missing, and a real bug shipped through the gap: the section's
+    effect read the same state it wrote, so it re-triggered itself, cleared
+    the list and re-fetched forever. Every request returned 200 and no video
+    ever rendered -- indistinguishable, from the outside, from a site that had
+    nothing. The request COUNT is therefore asserted as well as the result:
+    "it rendered" alone would have passed even while looping.
+*/
+const before = calls.length;
+const siteButton = [...target.querySelectorAll("button")].find((b) =>
+    (b.textContent || "").includes("hornyfap")
+);
+siteButton?.click();
+await new Promise((r) => setTimeout(r, 400));
+
+const opened = target.innerHTML;
+const videoCalls = calls.slice(before).filter((c) => c.includes("/videos"));
+
+console.log("site opens and renders its videos:", opened.includes("A Clip"));
+console.log("fetches that site exactly once:", videoCalls.length === 1, `(${videoCalls.length})`);
 
 handle.destroy();
 console.log("after destroy, empty:", target.innerHTML.trim() === "");
