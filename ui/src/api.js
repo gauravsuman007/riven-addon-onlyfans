@@ -54,6 +54,13 @@ async function post(path, params) {
 */
 export const listAccounts = (params) => get("/accounts", params);
 export const getAccount = (handle) => get(`/accounts/${encodeURIComponent(handle)}`);
+/*
+    Performers whose videos are titled like this one's. Content-based, because
+    collaborative filtering needs more than one user; an empty list is a normal
+    answer for an account the sampling pass has not reached yet.
+*/
+export const similarAccounts = (handle) =>
+    get(`/accounts/${encodeURIComponent(handle)}/similar`);
 export const accountVideos = (handle, site, page) =>
     get(`/accounts/${encodeURIComponent(handle)}/videos`, { site, page });
 export const accountGalleries = (handle, site, page) =>

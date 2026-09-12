@@ -321,6 +321,69 @@ class OnlyFansAccountStat(Base):
     )
 
 
+class OnlyFansAccountTerm(Base):
+    """One content word associated with one performer, and how strongly.
+
+    WHAT THIS IS, PRECISELY: terms taken from the TITLES of the videos the
+    sampling pass already fetched. It is not a scraped tag list and must not
+    be described as one. These sites do put tags on a video page, but not on
+    the grid cards -- so real tags cost a request per video, where this costs
+    nothing at all: `stats_batch` is already holding a page of titles per
+    account per site, and it used to read the view counts off them and throw
+    the rest away.
+
+    Titles on these sites are close to tags in practice ("POV", "JOI", "b/g",
+    "shower") because that is how the archives make their content findable,
+    which is what makes this a usable similarity signal rather than a clever
+    idea that does not work.
+
+    `weight` is NOT a raw count. It is the count scaled by how rare the term
+    is across the whole index, recomputed by `rescore`. Without that scaling
+    every performer's strongest terms are "onlyfans", "leaked" and "video",
+    every account is similar to every other account, and the feature looks
+    broken in the specific way that is hardest to diagnose: it returns
+    plausible-looking results that are actually arbitrary.
+    """
+
+    __tablename__ = "OnlyFansAccountTerm"
+
+    id: Mapped[int] = mapped_column(sqlalchemy.Integer, primary_key=True)
+
+    account_id: Mapped[int] = mapped_column(
+        sqlalchemy.Integer,
+        sqlalchemy.ForeignKey(f"{SCHEMA}.OnlyFansAccount.id", ondelete="CASCADE"),
+        index=True,
+    )
+
+    #: Casefolded, alphanumeric. Indexed because the similarity query joins
+    #: this table to itself on it.
+    term: Mapped[str] = mapped_column(sqlalchemy.String, index=True)
+
+    #: How many of the sampled titles used this word. The raw observation,
+    #: written once by the capture pass and never derived from.
+    count: Mapped[int] = mapped_column(sqlalchemy.Integer, default=0)
+
+    #: `count` scaled by how rare the term is across the index, rewritten from
+    #: scratch on every `rescore`.
+    #:
+    #: KEPT SEPARATE FROM `count` SO THE SCALING IS IDEMPOTENT. Deriving the
+    #: new weight from the old one compounds: each pass multiplies the
+    #: previous pass's already-scaled value by the rarity factor again, and
+    #: after a few runs a rare term's weight is astronomical, a common one's
+    #: is zero, and every similarity score is decided by how many times the
+    #: job has run rather than by the titles.
+    weight: Mapped[float] = mapped_column(sqlalchemy.Float, default=0.0)
+
+    __table_args__ = (
+        # One row per term per account. The capture pass replaces an account's
+        # terms wholesale, and without this a failure between the delete and
+        # the insert could leave duplicates that quietly double a term's
+        # contribution to every similarity score it appears in.
+        UniqueConstraint("account_id", "term", name="uq_onlyfans_account_term"),
+        Index("ix_onlyfans_term_weight", "term", "weight"),
+    )
+
+
 class OnlyFansSyncRun(Base):
     """What the index walk did on one site, last time it ran.
 

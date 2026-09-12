@@ -178,10 +178,50 @@ def test_every_rail_has_an_ordering():
     )
 
 
+def test_the_similarity_terms():
+    """What "more like this" is actually built from.
+
+    Every failure in this area is silent. A tokeniser that keeps the wrong
+    words still returns twenty plausible-looking performers; they are simply
+    the wrong twenty, and nothing logs or errors to say so. These assert the
+    two removals that decide whether the feature means anything.
+    """
+
+    from onlyfans_addon.service import _rarity, _terms
+
+    titles = [
+        "Sophie Rain OnlyFans leaked full video 1080p",
+        "sophie-rain shower JOI POV 4k",
+        "Sophie Rain shower tease",
+    ]
+    terms = _terms(titles, "sophierain")
+
+    # Their own name is in nearly every one of their titles, so left in it is
+    # their strongest term by a distance -- and since nobody else shares it, it
+    # contributes nothing to any similarity score while crowding out the terms
+    # that would.
+    check("the performer's own name is dropped", "sophie" not in terms and "rain" not in terms)
+    check("boilerplate is dropped", "onlyfans" not in terms and "leaked" not in terms)
+    check("resolutions are dropped", "1080p" not in terms and "4k" not in terms)
+    check("short tokens are dropped", not any(len(t) < 3 for t in terms))
+    check("real content words survive", "shower" in terms, str(sorted(terms)))
+    check("repeats are counted", terms.get("shower") == 2, str(terms.get("shower")))
+
+    # Rarity, which is what stops everybody matching everybody through the
+    # words that carry no information.
+    common = _rarity(500, 1000)
+    rare = _rarity(2, 1000)
+
+    check("a rare term outweighs a common one", rare > common, f"{rare} vs {common}")
+    check("nothing scores zero or below", common > 0 and _rarity(1000, 1000) > 0)
+    check("a term nobody else has does not divide by zero", _rarity(0, 0) > 0)
+
+
 test_every_scraper_request_goes_through_the_routed_session()
 test_the_vendored_copies_have_not_drifted()
 test_the_ranking_maths()
 test_every_rail_has_an_ordering()
+test_the_similarity_terms()
 
 print(f"\n{PASS} passed, {FAIL} failed")
 sys.exit(1 if FAIL else 0)

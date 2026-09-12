@@ -191,14 +191,56 @@ strip -- because a heading over a gap reads as a broken feature.
   no way to shorten this and no way to fake it -- it is the one thing a time
   series cannot give you on day one.
 
+## More like this
+
+On the detail page, and content-based because it has to be: the usual answer
+-- people who liked this also liked that -- needs an interaction matrix, and
+this add-on has one user. There is nothing to collaborate with.
+
+**Similarity is computed from what the videos are called.** `OnlyFansAccountTerm`
+holds content words taken from the titles the sampling pass already fetches.
+Real tags would be better and are not reachable cheaply: these sites put tags
+on the video page, never on the grid cards, so capturing them is a request per
+video rather than the zero extra requests this costs. Titles on these sites are
+close to tags in practice -- "POV", "JOI", "shower" -- because that is how the
+archives make content findable, and that is what makes this work rather than
+merely sound clever.
+
+Three removals decide whether it means anything, and every one of them fails
+silently if it is wrong -- the feature still returns twenty plausible-looking
+performers, just the wrong twenty:
+
+- **The performer's own name.** In nearly every one of their titles, so it is
+  their strongest term by a distance, and since nobody else shares it, it
+  contributes nothing while crowding out the terms that would.
+- **Boilerplate** ("onlyfans", "leaked", "full", resolutions, bare numbers).
+- **Terms more than 20% of the index carries.** These describe the archive
+  rather than the performer. Deleted outright, not down-weighted: they are the
+  bulk of the rows and every one is an edge in the self-join.
+
+What survives is weighted by inverse document frequency, recomputed from the
+raw count on every pass. The count and the weight are separate columns for
+exactly that reason -- deriving a weight from itself compounds, and within a
+few passes the scores say more about how often the job has run than about the
+titles.
+
+The score itself is the dot product of two accounts' term vectors: one
+self-join on an indexed column.
+
 ## Still not done
 
-1. **Probe the KVS windowed sorts** (`most_viewed`, weekly/monthly variants)
-   across all five sites, and record per site what actually works. Nothing
-   depends on it now that sampling works, but a site-computed weekly figure
-   would be cheaper and less noisy than the sampled delta.
-2. **Tag capture.** No scraper records the tags or categories on a video, so
-   there is nothing to compute content similarity from.
-3. **"More like this"** on the detail page, once (2) exists. Collaborative
-   filtering stays off the table: one user, no interaction matrix. A
-   personalised home feed is not reachable and should not be attempted.
+**Probe the KVS windowed sorts.** `scripts/probe_kvs.py` asks each site which
+of `most_viewed`, `rating` and the weekly/monthly variants it actually honours,
+by comparing the returned order against `post_date` -- an unknown sort key is
+*ignored* by KVS rather than rejected, so the 200 tells you nothing. It also
+dumps where a video page keeps its tag links, which is what real tag capture
+would need. It must run in the container, because every request it makes goes
+through the VPN-routed session:
+
+    docker exec riven-tpdb env PYTHONPATH=/riven/src:/riven/addons/onlyfans \
+      /riven/.venv/bin/python /riven/addons/onlyfans/scripts/probe_kvs.py
+
+Nothing depends on the answer: sampling works without it. A site-computed
+weekly figure would be cheaper and less noisy than the sampled delta, and real
+tags would beat title terms — both are upgrades to working features rather than
+missing pieces.

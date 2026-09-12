@@ -1,6 +1,13 @@
 <script>
-    import { getAccount, galleryImages, imageUrl, streamUrl } from "./api.js";
+    import {
+        getAccount,
+        galleryImages,
+        imageUrl,
+        similarAccounts,
+        streamUrl
+    } from "./api.js";
     import Poster from "./Poster.svelte";
+    import Rail from "./Rail.svelte";
     import SiteSection from "./SiteSection.svelte";
 
     let { handle, navigate, host } = $props();
@@ -276,6 +283,23 @@
             onplay={(video) => play(video)}
             ongallery={openGallery} />
     {/each}
+
+    <!--
+        Last, and it hides itself when it has nothing.
+
+        Similarity is computed from what these performers' videos are CALLED,
+        which is the only content signal available without a request per video
+        -- so an account the sampling pass has not reached yet has no answer,
+        and no row. Keyed on the handle so navigating from one performer to
+        another asks again instead of showing the previous one's neighbours.
+    -->
+    {#key account.handle}
+        <Rail
+            title="More like {account.display_name}"
+            note="similar content on the archive sites"
+            fetcher={() => similarAccounts(account.handle)}
+            {navigate} />
+    {/key}
 {:else}
     <p class="ofx-note">Loading…</p>
 {/if}

@@ -20,7 +20,12 @@
     let {
         title,
         note = "",
-        order,
+        /** An order for `/accounts`. Mutually exclusive with `fetcher`. */
+        order = null,
+        /** Any function returning `{ items }` or an array, for a rail that is
+         *  not a slice of the index -- "more like this" is its own endpoint
+         *  because it is scored against one account rather than ordered. */
+        fetcher = null,
         navigate,
         size = 20,
         /** Rendered to the right of the heading, for a rail that has controls
@@ -43,21 +48,29 @@
         // `items` and `loading` are written below and reading them inside the
         // tracked part would make this re-run itself.
         const which = order;
+        const ask = fetcher;
         const count = size;
         nonce;
 
         let stale = false;
 
         loading = true;
-        listAccounts({ order: which, limit: count, offset: 0 }).then((result) => {
+
+        const request = ask
+            ? ask()
+            : listAccounts({ order: which, limit: count, offset: 0 });
+
+        Promise.resolve(request).then((result) => {
             if (stale) return;
-            items = result?.items ?? [];
+            // Either shape: `/accounts` pages its answer, `/similar` returns a
+            // bare list because it is already capped and has no more to give.
+            items = Array.isArray(result) ? result : (result?.items ?? []);
             loading = false;
         });
 
         return () => {
-            // A rail whose order changed must not be filled in by the reply to
-            // the question it used to be asking.
+            // A rail whose question changed must not be filled in by the reply
+            // to the question it used to be asking.
             stale = true;
         };
     });

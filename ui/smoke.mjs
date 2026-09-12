@@ -45,7 +45,16 @@ globalThis.fetch = async (url) => {
     return {
         ok: true,
         json: async () =>
-            String(url).includes("/videos")
+            String(url).includes("/similar")
+                ? [
+                      {
+                          handle: "neighbour",
+                          display_name: "A Neighbour",
+                          avatar_url: null,
+                          source_count: 3
+                      }
+                  ]
+                : String(url).includes("/videos")
                 ? [
                       {
                           site: "hornyfap",
@@ -179,6 +188,16 @@ console.log("detail verified badge:", detail.includes("ofx-verified"));
 console.log("detail profile link:", detail.includes("onlyfans.com/demo"));
 console.log("detail stats:", detail.includes("photos") && detail.includes("likes"));
 console.log("detail site button:", detail.includes("hornyfap"));
+/*
+    "More like this" returns a BARE LIST, not a page -- it is already capped
+    and has no more to give -- while every other rail returns `{ items }`. The
+    rail handles both, and this is what says so.
+*/
+console.log("similar rail rendered:", detail.includes("A Neighbour"));
+console.log(
+    "similar rail is titled for the performer:",
+    detail.includes("More like Demo Person")
+);
 
 /*
     OPENING A SITE, which is where the content actually comes from.

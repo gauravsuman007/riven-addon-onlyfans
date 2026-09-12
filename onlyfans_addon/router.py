@@ -45,6 +45,7 @@ from program.db.db import db_session
 from onlyfans_addon.models import (
     OnlyFansAccount,
     OnlyFansAccountSource,
+    OnlyFansAccountTerm,
     OnlyFansSyncRun,
 )
 from onlyfans_addon.scraper_api.base import BROWSER_HEADERS
@@ -306,6 +307,78 @@ def list_accounts(
             offset=offset,
             limit=limit,
         )
+
+
+@router.get(
+    "/accounts/{handle}/similar", operation_id="similar_onlyfans_accounts"
+)
+def similar_accounts(
+    handle: str,
+    limit: Annotated[int, Query(ge=1, le=50)] = 20,
+) -> list[AccountResponse]:
+    """Performers whose content reads like this one's.
+
+    CONTENT-BASED, AND IT HAS TO BE. The usual answer -- people who liked this
+    also liked that -- needs an interaction matrix, and this add-on has one
+    user. There is nothing to collaborate with, so similarity is computed from
+    what the performers' videos are *called*: see `OnlyFansAccountTerm` for
+    where those words come from and why titles stand in for tags here.
+
+    The score is the dot product of two accounts' term vectors, which is one
+    self-join on an indexed column rather than anything iterative. Weights are
+    already rarity-scaled, so a term both accounts share contributes in
+    proportion to how much sharing it says -- two performers who both use an
+    unusual word are far more alike than two who both use a common one.
+
+    Returns an empty list rather than a 404 when there is nothing to say. A
+    performer the sampling pass has not reached yet, or one whose terms were
+    all too common to keep, genuinely has no answer -- and the detail page
+    renders that as an absent row, which is the truth.
+    """
+
+    with db_session() as session:
+        account = session.execute(
+            select(OnlyFansAccount).where(
+                OnlyFansAccount.handle == normalise_handle(handle)
+            )
+        ).scalar_one_or_none()
+
+        if account is None:
+            raise HTTPException(status_code=404, detail="No such account")
+
+        mine = OnlyFansAccountTerm.__table__.alias("mine")
+        theirs = OnlyFansAccountTerm.__table__.alias("theirs")
+
+        scores = (
+            select(
+                theirs.c.account_id,
+                func.sum(mine.c.weight * theirs.c.weight).label("score"),
+            )
+            .select_from(
+                mine.join(theirs, mine.c.term == theirs.c.term)
+            )
+            .where(
+                mine.c.account_id == account.id,
+                theirs.c.account_id != account.id,
+                # A zero-weight term is one the scoring pass has not reached
+                # yet. Included, it contributes nothing but still makes the
+                # account it belongs to look like a match worth returning.
+                mine.c.weight > 0,
+                theirs.c.weight > 0,
+            )
+            .group_by(theirs.c.account_id)
+            .order_by(func.sum(mine.c.weight * theirs.c.weight).desc())
+            .limit(limit)
+            .subquery()
+        )
+
+        matches = session.execute(
+            select(OnlyFansAccount)
+            .join(scores, OnlyFansAccount.id == scores.c.account_id)
+            .order_by(scores.c.score.desc())
+        ).scalars().all()
+
+        return [_account_response(match) for match in matches]
 
 
 @router.get("/accounts/{handle}", operation_id="get_onlyfans_account")

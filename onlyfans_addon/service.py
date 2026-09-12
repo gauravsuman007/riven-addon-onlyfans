@@ -18,6 +18,7 @@ else, and a run that dies halfway leaves everything it already committed.
 """
 
 import bisect
+import math
 import re
 from datetime import datetime, timedelta
 
@@ -29,6 +30,7 @@ from onlyfans_addon.models import (
     OnlyFansAccount,
     OnlyFansAccountSource,
     OnlyFansAccountStat,
+    OnlyFansAccountTerm,
     OnlyFansSyncRun,
 )
 from onlyfans_addon.config import settings as addon_settings
@@ -370,6 +372,11 @@ class OnlyFansService:
                 return
 
             now = utcnow()
+            # Titles from every site, pooled. A performer's terms describe the
+            # performer, not one archive's copy of them, and a site that
+            # happens to page larger should not get a proportionally larger
+            # say in who they are similar to.
+            titles: list[str] = []
 
             for source in account.sources:
                 scraper = scrapers.get(source.site)
@@ -385,6 +392,11 @@ class OnlyFansService:
                         f"{source.site_handle}: {exc}"
                     )
                     continue
+
+                # FREE. This request was already being made for the view
+                # counts; the titles came back with them and used to be
+                # dropped on the floor.
+                titles.extend(video.title for video in videos)
 
                 # Only videos the site actually put a number on. Counting a
                 # missing view count as zero would make a site that does not
@@ -408,8 +420,51 @@ class OnlyFansService:
                     )
                 )
 
+            if titles:
+                self._store_terms(session, account, titles)
+
             account.stats_checked_at = now
             session.commit()
+
+    def _store_terms(self, session, account: OnlyFansAccount, titles: list[str]) -> None:
+        """Replace this account's terms with what its current titles say.
+
+        REPLACED, NOT MERGED. A performer's feed moves on, and terms that
+        accumulate never expire: an account would keep being recommended for
+        what it posted a year ago, with the evidence long gone from the only
+        page this pass ever looks at.
+
+        Weights are raw counts here. `rescore` rewrites them against the
+        index's own term frequencies, because how distinctive a word is cannot
+        be known from one account's titles.
+        """
+
+        counts = _terms(titles, account.handle)
+
+        if not counts:
+            return
+
+        keep = sorted(counts.items(), key=lambda item: item[1], reverse=True)
+
+        session.execute(
+            delete(OnlyFansAccountTerm).where(
+                OnlyFansAccountTerm.account_id == account.id
+            )
+        )
+        # Flushed before the inserts: the delete and the inserts collide on the
+        # (account_id, term) unique constraint otherwise, since SQLAlchemy is
+        # free to order them the other way round within one flush.
+        session.flush()
+
+        session.add_all(
+            # `weight` is left at zero: it is not knowable from one account's
+            # titles, and `rescore` fills it in against the whole index. A term
+            # is therefore invisible to "more like this" until the next scoring
+            # pass, which is the honest state -- it has not yet been established
+            # that the word means anything.
+            OnlyFansAccountTerm(account_id=account.id, term=term, count=count)
+            for term, count in keep[:_MAX_TERMS_PER_ACCOUNT]
+        )
 
     def rescore(self) -> int:
         """Recompute every account's popularity and trending score.
@@ -456,6 +511,7 @@ class OnlyFansService:
 
             trending = self._trending_deltas(session)
             scored = self._apply_scores(session, ranked, trending)
+            self._weight_terms(session)
 
             # Pruned here rather than in its own job: this is the only thing
             # that reads the series, so it is the only thing that knows what
@@ -471,6 +527,82 @@ class OnlyFansService:
 
         logger.info(f"OnlyFans: scored {scored} accounts")
         return scored
+
+    def _weight_terms(self, session) -> None:
+        """Rewrite every term's weight by how rare the term is.
+
+        A raw count says how often a performer's titles use a word. It does
+        not say whether the word means anything: on these sites a word like
+        "shower" appears in a handful of feeds and a word like "bathroom" in
+        half of them, and a similarity built on counts alone matches everybody
+        to everybody through the words that carry no information.
+
+        THE FAILURE MODE IS NOT AN ERROR. Unweighted, "more like this" still
+        returns twenty plausible-looking performers -- they are simply the
+        wrong twenty, ranked by how generic their titles are. Nothing logs,
+        nothing 500s, and the only way to notice is to already know what the
+        answer should have been. That is why this runs on every pass rather
+        than being an optimisation to add later.
+
+        Always computed from `count`, never from the existing `weight`. See
+        the column comment: deriving it from itself compounds, and within a
+        few passes the scores say more about how often the job has run than
+        about the titles.
+        """
+
+        frequency = dict(
+            session.execute(
+                select(
+                    OnlyFansAccountTerm.term,
+                    func.count(func.distinct(OnlyFansAccountTerm.account_id)),
+                ).group_by(OnlyFansAccountTerm.term)
+            ).all()
+        )
+
+        if not frequency:
+            return
+
+        population = session.execute(
+            select(func.count(func.distinct(OnlyFansAccountTerm.account_id)))
+        ).scalar_one()
+
+        if not population:
+            return
+
+        # Carried by more of the index than this and the term describes the
+        # archive rather than the performer. Deleted rather than down-weighted:
+        # they are the bulk of the rows, and every one of them is an edge in
+        # the self-join that answers "more like this".
+        ubiquitous = {
+            term
+            for term, seen in frequency.items()
+            if seen / population > _TERM_UBIQUITY
+        }
+
+        if ubiquitous:
+            session.execute(
+                delete(OnlyFansAccountTerm).where(
+                    OnlyFansAccountTerm.term.in_(ubiquitous)
+                )
+            )
+            logger.debug(
+                f"OnlyFans: dropped {len(ubiquitous)} terms carried by more than "
+                f"{int(_TERM_UBIQUITY * 100)}% of the index"
+            )
+
+        updates = [
+            {"id": row.id, "weight": row.count * _rarity(frequency[row.term], population)}
+            for row in session.execute(
+                select(
+                    OnlyFansAccountTerm.id,
+                    OnlyFansAccountTerm.term,
+                    OnlyFansAccountTerm.count,
+                ).where(OnlyFansAccountTerm.term.not_in(ubiquitous or {""}))
+            ).all()
+        ]
+
+        if updates:
+            session.execute(update(OnlyFansAccountTerm), updates)
 
     def _trending_deltas(self, session) -> dict[int, float]:
         """How much each account's sampled views grew over the trailing week.
@@ -873,10 +1005,93 @@ class OnlyFansService:
 STALE_AFTER = 3600
 
 
+#: Words that appear in so many titles on these sites that they identify
+#: nothing. Removed before the rarity weighting rather than left to it, because
+#: several of them are in a majority of titles on a single site and a majority
+#: is not rare enough for the weighting to flatten on its own.
+#:
+#: Deliberately short. The rarity weighting in `rescore` is the real filter --
+#: it is measured against this index rather than guessed at, so it catches the
+#: site-specific noise no hand-written list could anticipate. This only has to
+#: remove the words that are noise everywhere.
+_STOP_TERMS = frozenset(
+    """
+    onlyfans of leak leaks leaked full video videos vid clip clips new
+    free download watch online hd sd part pt ep episode com net org tv
+    the and for with her his she he you your mine this that from
+    porn sex xxx nude nudes naked pack mega folder
+    """.split()
+)
+
+#: Below this a token is an artefact rather than a word: initials, stray
+#: letters left by a separator, the "4" in "4k".
+_MIN_TERM_LENGTH = 3
+
+#: How many terms to keep per account, strongest first. A long tail of
+#: once-seen words adds nothing to a similarity score and multiplies the size
+#: of the self-join that computes it.
+_MAX_TERMS_PER_ACCOUNT = 25
+
+#: A term carried by more than this share of the measured index describes the
+#: site rather than the performer. `rescore` deletes these outright.
+_TERM_UBIQUITY = 0.2
+
+_TERM_SPLIT_RE = re.compile(r"[^a-z0-9]+")
+#: Resolutions, bitrates and bare numbers. A title is full of them and none of
+#: them say anything about who the performer is.
+_TERM_NUMERIC_RE = re.compile(r"^\d+[a-z]?$")
+
+
+def _terms(titles: list[str], exclude: str) -> dict[str, int]:
+    """Content words and their counts, from a page of video titles.
+
+    `exclude` is the performer's own collapsed handle, and dropping it is not
+    cosmetic: their name is in nearly every one of their titles, so left in it
+    is their single strongest term -- and since no one else shares it, it
+    contributes nothing to any similarity score while crowding out the terms
+    that would.
+
+    Matched as a SUBSTRING of the handle, which over-removes a little: a token
+    that happens to sit inside the handle goes too. That is the right way to
+    be wrong here -- the handle is already collapsed, so the sites' three
+    spellings of a name all have to be caught by one test, and losing an
+    occasional real word costs less than leaving the name in.
+    """
+
+    counts: dict[str, int] = {}
+
+    for title in titles:
+        for token in _TERM_SPLIT_RE.split((title or "").casefold()):
+            if (
+                len(token) < _MIN_TERM_LENGTH
+                or token in _STOP_TERMS
+                or _TERM_NUMERIC_RE.match(token)
+                or token in exclude
+            ):
+                continue
+
+            counts[token] = counts.get(token, 0) + 1
+
+    return counts
+
+
 #: Added to the denominator when a growth rate is computed, so that a performer
 #: who went from two views to twelve does not outrank the whole index. Roughly
 #: "a page nobody watched" -- below this, a delta is noise rather than a trend.
 _TRENDING_FLOOR = 500
+
+
+def _rarity(seen_by: int, population: int) -> float:
+    """Inverse document frequency: how much a term's presence tells you.
+
+    The standard smoothed form. A term half the index carries scores near
+    zero; one a dozen accounts carry scores high. The `+ 1`s are what keep a
+    term carried by every single account from producing a zero that erases an
+    account's whole vector, and what keeps a term carried by one account from
+    dividing by zero.
+    """
+
+    return math.log((population + 1) / (seen_by + 1)) + 1
 
 
 def _percentile(sorted_values: list, value) -> float:

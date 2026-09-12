@@ -101,6 +101,23 @@ Anything beyond that is reaching into the host's internals and will break.
 - **`order=random` is not pageable.** The order is redrawn per request, so
   `offset` would skip and repeat. Shuffle is a fresh request at offset 0.
 
+### "More like this"
+
+- **`OnlyFansAccountTerm` holds words from video TITLES, not scraped tags.**
+  Tags live on the video page, never on the grid cards, so real tags are a
+  request per video; titles come free with the sampling pass. Do not describe
+  this as tags anywhere a user reads.
+- **`count` and `weight` are separate columns on purpose.** `weight` is always
+  recomputed from `count`. Derive it from itself and it compounds -- within a
+  few passes the scores say more about how often the job has run than about
+  the titles.
+- **Every failure in this area is silent.** A wrong tokeniser, a missing
+  rarity weighting, an unfiltered ubiquitous term: all of them still return
+  twenty plausible-looking performers. Nothing logs and nothing 500s. The
+  tests in `tests/test_onlyfans_addon.py` are the only thing that notices.
+- **Collaborative filtering is not available and never will be here.** One
+  user, no interaction matrix. Do not add a "personalised feed".
+
 ## What a change here has to preserve
 
 - **One file, one `DirectScraper` subclass.** `key` is unique and is what
@@ -207,6 +224,13 @@ and `tests/test_onlyfans_addon.py` calls it.
       /riven/.venv/bin/python /riven/addons/onlyfans/tests/test_onlyfans_addon.py
 
     cd ui && npm install && npm run build && npm run smoke
+
+Asking the sites what they support -- which sort orders they honour, where a
+video page keeps its tags. Container only, because its requests go through the
+VPN-routed session:
+
+    docker exec riven-tpdb env PYTHONPATH=/riven/src:/riven/addons/onlyfans \
+      /riven/.venv/bin/python /riven/addons/onlyfans/scripts/probe_kvs.py
 
 `ui/addon.js` is **committed build output** -- the host serves it and builds
 nothing, so editing `ui/src/` without rebuilding ships the previous bundle
