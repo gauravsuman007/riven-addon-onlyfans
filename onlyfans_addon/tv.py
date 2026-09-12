@@ -83,7 +83,7 @@ def _thumbnail(site: str, url: str | None) -> str:
 #: A list rather than "proxy everything": proxying is a round trip through
 #: this server per picture, and a grid is sixty of them. Add a site here when
 #: its stills come back blank, and not before.
-PROXY_THUMBNAILS = {"hornyfap"}
+PROXY_THUMBNAILS = {"hornyfap", "porn4fans"}
 
 
 @router.get("/thumb", operation_id="onlyfans_tv_thumb")
@@ -113,7 +113,19 @@ async def tv_thumb(
     if wanted.scheme not in ("http", "https") or not wanted.netloc:
         raise HTTPException(status_code=400, detail="Not a fetchable image")
 
-    if not allowed.netloc or wanted.netloc.lower() != allowed.netloc.lower():
+    def bare(host: str) -> str:
+        # `www.` and nothing else. porn4fans serves its stills from
+        # `www.porn4fans.com` while its `base_url` is the bare domain, so
+        # strict equality refused every picture it has. Stripping only this
+        # one prefix keeps the check to "the same site", not "a related one":
+        # a subdomain comparison would let `evil.porn4fans.com.attacker.net`
+        # through on a sloppy suffix match, which is the usual way this goes
+        # wrong.
+        host = host.lower()
+
+        return host[4:] if host.startswith("www.") else host
+
+    if not allowed.netloc or bare(wanted.netloc) != bare(allowed.netloc):
         raise HTTPException(status_code=403, detail="Not this site's image")
 
     try:
