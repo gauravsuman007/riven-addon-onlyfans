@@ -75,12 +75,31 @@ Anything beyond that is reaching into the host's internals and will break.
 - **`avatar_from_site`** marks a borrowed picture. Without it, `avatar_url or
   ...` could never upgrade an archive thumbnail to the performer's own.
 
-## Planned work
+## The ranking pass
 
-`docs/recommendations.md` is the design for ranked rails (Trending, Most
-popular, Rising, New). Nothing in it is implemented. Its two load-bearing
-findings: popularity does **not** come from onlyfans.com, and `DirectVideo.views`
-is already parsed by every scraper and then discarded.
+`docs/recommendations.md` is the whole design; the traps:
+
+- **No ranking signal comes from onlyfans.com.** There is no public directory,
+  chart or leaderboard on the platform, so there is nothing to scrape that
+  ranks creators. `likes_count` from the profile API is a lifetime counter --
+  it says "big", never "hot" -- and it is only populated for the minority of
+  accounts the profile pass resolved, so ordering by it would rank *enriched*
+  above *popular*. The signal is `DirectVideo.views` from the archive sites.
+- **`recent_views` is a SAMPLE, not a total.** The newest page of a
+  performer's feed, per site. Summing every video would be hundreds of
+  thousands of requests for a ranking that comes out the same.
+- **Normalise within a site before combining anything.** The five sites have
+  wildly different traffic; on raw counts the biggest one decides the whole
+  ranking and a performer carried only by the small sites can never place.
+- **Trending needs two passes a week apart** and is null until then. An empty
+  Trending rail on a new install is the feature working.
+- **`OnlyFansAccountStat` is kept per site, never pre-summed.** A site that
+  goes dark would otherwise read as every performer on it collapsing at once,
+  and afterwards that is indistinguishable from a real decline.
+- **`rescore` walks every account, not just the measured ones.** That is the
+  only way a score gets *cleared* when its sites stop reporting.
+- **`order=random` is not pageable.** The order is redrawn per request, so
+  `offset` would skip and repeat. Shuffle is a fresh request at offset 0.
 
 ## What a change here has to preserve
 

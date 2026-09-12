@@ -73,6 +73,12 @@ globalThis.fetch = async (url) => {
                       location: "Somewhere",
                       sources: [{ site: "hornyfap", site_handle: "demo", video_count: 3 }]
                   }
+                : // A rail the ranking pass has not reached yet. Trending needs
+                  // the index sampled twice a week apart, so on a fresh
+                  // install it is legitimately empty -- and the rail has to
+                  // render nothing at all rather than a heading over a gap.
+                  String(url).includes("order=trending")
+                ? { items: [], total: 0 }
                 : {
                       items: [
                           {
@@ -115,6 +121,53 @@ console.log("api calls:", calls);
 console.log("rendered h1:", /<h1[^>]*>([^<]*)/.exec(html)?.[1]?.trim());
 console.log("renders the account:", html.includes("Demo Person"));
 console.log("has search box:", html.includes('type="search"'));
+
+/*
+    THE RAILS.
+
+    Each one asks for itself, so the count of requests is as much of the
+    assertion as the markup: a rail whose effect reads the state it writes
+    re-runs forever, renders correctly the whole time, and is invisible from
+    the outside. That exact bug already shipped once in `SiteSection`.
+*/
+const railCalls = calls.filter((c) => c.includes("order="));
+console.log("one request per rail:", railCalls.length === 6, `(${railCalls.length})`);
+console.log("popular rail rendered:", html.includes("Most popular"));
+console.log("random rail rendered:", html.includes("Something else"));
+// The stub answers `order=trending` with nothing, which is what a fresh index
+// really looks like for a week.
+console.log("empty rail hides itself:", !html.includes("Trending"));
+
+// Shuffle: the same rail, asked again, and nothing else re-requested.
+const beforeShuffle = calls.length;
+[...target.querySelectorAll("button")]
+    .find((b) => (b.textContent || "").includes("Shuffle"))
+    ?.click();
+await new Promise((r) => setTimeout(r, 200));
+const shuffled = calls.slice(beforeShuffle);
+console.log(
+    "shuffle refetches only the random rail:",
+    shuffled.length === 1 && shuffled[0].includes("order=random")
+);
+
+// Show all: out of the rails and into the paginated grid, which is the same
+// list the page has always had.
+[...target.querySelectorAll("button")]
+    .find((b) => (b.textContent || "").includes("Show all"))
+    ?.click();
+await new Promise((r) => setTimeout(r, 200));
+const all = target.innerHTML;
+console.log("show all opens the full grid:", all.includes("ofx-grid"));
+console.log("show all leaves the rails:", !all.includes("Something else"));
+console.log("show all offers a way back:", all.includes("Back to recommendations"));
+
+// ...and back, so the rails are not a one-way door.
+[...target.querySelectorAll("button")]
+    .find((b) => (b.textContent || "").includes("Back to recommendations"))
+    ?.click();
+await new Promise((r) => setTimeout(r, 200));
+console.log("back returns to the rails:", target.innerHTML.includes("Something else"));
+
 // The detail screen, reached the way the host reaches it: same mount, new path.
 handle.update("demo");
 await new Promise((r) => setTimeout(r, 300));

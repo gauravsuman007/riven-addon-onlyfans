@@ -115,8 +115,73 @@ def test_the_vendored_copies_have_not_drifted():
     )
 
 
+# --- ranking ----------------------------------------------------------------
+
+
+def test_the_ranking_maths():
+    """`_percentile` is what puts every site's figures on one scale.
+
+    It is four lines and the whole ranking rests on them, so the properties
+    that matter are asserted rather than assumed -- particularly ties. Five
+    performers on the same view count must score the same; ranking them
+    against each other by whatever order the database returned would make the
+    rails reshuffle between passes for no reason a user could ever see.
+    """
+
+    from onlyfans_addon.service import _percentile
+
+    values = [1, 5, 5, 5, 9]
+
+    check("the smallest value scores 0", _percentile(values, 1) == 0.0)
+    check("the largest value scores 1", _percentile(values, 9) == 1.0)
+    check(
+        "tied values score the same",
+        _percentile(values, 5) == _percentile(values, 5),
+    )
+    check(
+        "a tie takes the rank of the first of its group",
+        _percentile(values, 5) == 0.25,
+        f"got {_percentile(values, 5)}",
+    )
+    check(
+        "everything is between 0 and 1",
+        all(0.0 <= _percentile(values, v) <= 1.0 for v in (0, 1, 5, 9, 99)),
+    )
+    # A site carrying one measured account has no distribution to rank
+    # against. Dividing by `len - 1` would be a ZeroDivisionError, and the
+    # honest answer is that its only account is its most popular one.
+    check("a single value does not divide by zero", _percentile([7], 7) == 1.0)
+    check("an empty distribution is survivable", _percentile([], 7) == 1.0)
+
+
+def test_every_rail_has_an_ordering():
+    """The rails the page asks for are the orders the API offers.
+
+    These are two lists in two languages -- `Grid.svelte` names them as
+    strings, `router.py` keys a dict on them -- and a typo in either produces
+    a 400 for one row of the page while every other row works.
+    """
+
+    from onlyfans_addon.router import _ORDERS
+
+    wanted = {"trending", "rising", "popular", "new", "carried", "random"}
+
+    check(
+        "the API offers every order the page asks for",
+        wanted <= set(_ORDERS),
+        f"missing {sorted(wanted - set(_ORDERS))}",
+    )
+    check(
+        "the API offers nothing the page does not ask for",
+        set(_ORDERS) <= wanted,
+        f"extra {sorted(set(_ORDERS) - wanted)}",
+    )
+
+
 test_every_scraper_request_goes_through_the_routed_session()
 test_the_vendored_copies_have_not_drifted()
+test_the_ranking_maths()
+test_every_rail_has_an_ordering()
 
 print(f"\n{PASS} passed, {FAIL} failed")
 sys.exit(1 if FAIL else 0)

@@ -94,6 +94,12 @@ class OnlyFansAddon(Addon):
             # are what makes the grid look like anything, so they fill in on
             # an ordinary batch cadence rather than waiting a week.
             service.scheduled_enrich: {"interval": settings.enrich_interval},
+            # The ranking pass. Registered whatever `stats_enabled` says and
+            # gated inside the job instead, because the job map is read once
+            # at load: gating it here would mean toggling the setting did
+            # nothing until the next restart, which is the same trap as
+            # binding settings to an attribute.
+            service.scheduled_stats: {"interval": settings.stats_interval},
         }
 
     def start(self) -> None:

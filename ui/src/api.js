@@ -46,6 +46,12 @@ async function post(path, params) {
     }
 }
 
+/*
+    One endpoint behind every list on the page. A rail is a page of the index
+    in a particular order -- `carried`, `popular`, `trending`, `rising`, `new`
+    or `random` -- so the full grid, each rail, and the search results are all
+    this call with different arguments.
+*/
 export const listAccounts = (params) => get("/accounts", params);
 export const getAccount = (handle) => get(`/accounts/${encodeURIComponent(handle)}`);
 export const accountVideos = (handle, site, page) =>

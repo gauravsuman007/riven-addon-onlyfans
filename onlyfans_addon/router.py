@@ -189,14 +189,62 @@ def _account_response(account: OnlyFansAccount) -> AccountResponse:
 # --- The index --------------------------------------------------------------
 
 
+#: A rising account has to be outside the top of the popularity distribution.
+#: The scores are percentiles, so this is literally "not already in the top
+#: quarter of the index".
+_RISING_CEILING = 0.75
+
+#: Every way the index can be ordered, and what each one requires of a row to
+#: be eligible for it.
+#:
+#: THE FILTERS ARE THE POINT, not the sorts. A score is null until the ranking
+#: pass has reached that account, and null sorts last -- so an unfiltered
+#: "most popular" would be a list of every account in the index with the
+#: measured ones at the front, which reads as though the rail is broken once
+#: you scroll. Each rail shows only rows it can actually speak for, and its
+#: `total` says how many that is.
+#:
+#: `rising` is the one worth explaining. It is the only rail that surfaces
+#: accounts nobody has already seen: high growth on a LOW base, so a performer
+#: who doubled from little is ranked above one who is merely large and still
+#: growing. Without the popularity ceiling it would be Trending with extra
+#: steps, because the biggest accounts also move the most in absolute terms.
+_ORDERS = {
+    "carried": lambda q: q.order_by(
+        OnlyFansAccount.source_count.desc(),
+        OnlyFansAccount.display_name.asc(),
+    ),
+    "popular": lambda q: q.where(
+        OnlyFansAccount.popularity_score.is_not(None)
+    ).order_by(OnlyFansAccount.popularity_score.desc()),
+    "trending": lambda q: q.where(
+        OnlyFansAccount.trending_score.is_not(None)
+    ).order_by(OnlyFansAccount.trending_score.desc()),
+    "rising": lambda q: q.where(
+        OnlyFansAccount.trending_score.is_not(None),
+        OnlyFansAccount.popularity_score < _RISING_CEILING,
+    ).order_by(OnlyFansAccount.trending_score.desc()),
+    # "New to this index", which is not "new on OnlyFans" and is never
+    # labelled as such -- `created_at` is when the sync first saw them.
+    "new": lambda q: q.order_by(OnlyFansAccount.created_at.desc()),
+    # NOT PAGEABLE, and nothing asks it to be: the order is redrawn on every
+    # request, so `offset` would skip and repeat rows rather than walk a list.
+    # The shuffle on the page is a fresh request at offset 0, and its "show
+    # all" opens the default order instead -- which is the only sensible
+    # meaning "all of a random selection" can have.
+    "random": lambda q: q.order_by(func.random()),
+}
+
+
 @router.get("/accounts", operation_id="list_onlyfans_accounts")
 def list_accounts(
     search: Annotated[str | None, Query()] = None,
     saved: Annotated[bool | None, Query()] = None,
+    order: Annotated[str, Query()] = "carried",
     limit: Annotated[int, Query(ge=1, le=200)] = 60,
     offset: Annotated[int, Query(ge=0)] = 0,
 ) -> AccountPage:
-    """A page of the performer index.
+    """A page of the performer index, ordered however the caller asks.
 
     Real offset paging rather than the studio directory's bare `limit`: that
     list is ~1,200 rows and can be sent whole, this one runs to tens of
@@ -205,7 +253,23 @@ def list_accounts(
     The search matches the *collapsed* handle as well as the display name, so
     typing "sophie rain", "sophierain" or "Sophie-Rain" all find the same
     account -- which is the whole reason the collapsed form is stored.
+
+    One endpoint for the rails as well as the full grid, rather than a route
+    per rail. A rail IS a page of this list in a particular order, so the
+    "show all" behind each one is the same request with a bigger limit, and
+    search keeps working inside a rail for free.
+
+    An unknown `order` is a 400 rather than a silent fallback to the default.
+    A rail that quietly serves the wrong ordering looks like a ranking that
+    does not work, which is the most expensive kind of bug to notice.
     """
+
+    if order not in _ORDERS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unknown order {order!r}. Expected one of: "
+            + ", ".join(sorted(_ORDERS)),
+        )
 
     with db_session() as session:
         query = select(OnlyFansAccount)
@@ -222,24 +286,18 @@ def list_accounts(
                 )
             )
 
+        # Ordered BEFORE the count, because several orders carry a `where` of
+        # their own and the total has to be the count of what this rail can
+        # actually serve. Counting the unfiltered query would make an infinite
+        # scroll on a half-scored index request forever.
+        query = _ORDERS[order](query)
+
         total = session.execute(
             select(func.count()).select_from(query.subquery())
         ).scalar_one()
 
         accounts = (
-            session.execute(
-                # Accounts several sites agree on first: one that three
-                # independent archives indexed is likelier to be a real,
-                # findable performer than one that appears once.
-                query.order_by(
-                    OnlyFansAccount.source_count.desc(),
-                    OnlyFansAccount.display_name.asc(),
-                )
-                .offset(offset)
-                .limit(limit)
-            )
-            .scalars()
-            .all()
+            session.execute(query.offset(offset).limit(limit)).scalars().all()
         )
 
         return AccountPage(

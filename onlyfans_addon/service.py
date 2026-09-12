@@ -17,16 +17,18 @@ degrade, never raise. A site that is down costs its own accounts and nothing
 else, and a run that dies halfway leaves everything it already committed.
 """
 
+import bisect
 import re
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from loguru import logger
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select, update
 
 from program.db.db import db_session
 from onlyfans_addon.models import (
     OnlyFansAccount,
     OnlyFansAccountSource,
+    OnlyFansAccountStat,
     OnlyFansSyncRun,
 )
 from onlyfans_addon.config import settings as addon_settings
@@ -275,6 +277,347 @@ class OnlyFansService:
         except Exception as exc:
             logger.debug(f"OnlyFans: could not store {key}:{account.handle}: {exc}")
             return False, False
+
+    # --- Ranking ------------------------------------------------------------
+    #
+    # A third pass, and separate from the other two for the same reason they
+    # are separate from each other. `sync` is wide and cheap, `enrich_batch`
+    # is narrow and expensive per account, and this one is narrow, expensive
+    # AND periodic: it has to come back to the same account repeatedly,
+    # because the thing it measures is a rate of change.
+    #
+    # WHY NONE OF THIS COMES FROM ONLYFANS.COM. There is no public directory,
+    # chart or leaderboard on the platform -- discovery happens off it -- so
+    # there is nothing to scrape that ranks creators. The profile API this
+    # add-on already uses reports `likes_count`, which is a lifetime counter
+    # that only ever grows: it says "big", never "hot", and it is populated
+    # only for the minority of accounts the profile pass resolved. Ordering by
+    # it would rank "enriched" above "popular". See docs/recommendations.md.
+
+    def stats_batch(self, limit: int | None = None) -> int:
+        """Sample view counts for accounts whose figures are stale.
+
+        One request per account per site: the newest page of that site's feed
+        for that performer, which is 12-25 videos with a view count on each.
+        The scrapers already parse those into `DirectVideo.views` -- nothing
+        used to keep them.
+
+        Deliberately a sample. Summing every video of every performer is a
+        request per page per account per site, which is hundreds of thousands
+        of requests to produce a ranking that comes out the same. It is also
+        the better measurement for these rails: a Trending row should not be
+        decided by a back catalogue nobody is watching.
+
+        Returns accounts attempted, not accounts measured. A site that answers
+        nothing is a normal outcome.
+        """
+
+        from onlyfans_addon.registry import registry
+
+        limit = limit or self.settings.stats_batch_size
+        scrapers = registry().services
+        cutoff = utcnow() - timedelta(days=self.settings.stats_max_age_days)
+
+        with db_session() as session:
+            pending = (
+                session.execute(
+                    select(OnlyFansAccount)
+                    .where(
+                        (OnlyFansAccount.stats_checked_at.is_(None))
+                        | (OnlyFansAccount.stats_checked_at < cutoff)
+                    )
+                    # Saved accounts first, then the ones the most sites agree
+                    # exist, then the longest unmeasured. The last clause is
+                    # what makes this a rotation rather than a queue that only
+                    # ever serves the top of the index.
+                    .order_by(
+                        OnlyFansAccount.saved.desc(),
+                        OnlyFansAccount.source_count.desc(),
+                        OnlyFansAccount.stats_checked_at.asc().nulls_first(),
+                    )
+                    .limit(limit)
+                )
+                .scalars()
+                .all()
+            )
+            account_ids = [account.id for account in pending]
+
+        attempted = 0
+
+        for account_id in account_ids:
+            try:
+                self._stats_one(account_id, scrapers)
+                attempted += 1
+            except Exception as exc:
+                logger.debug(f"OnlyFans: stats failed for {account_id}: {exc}")
+
+        logger.debug(f"OnlyFans: sampled view counts for {attempted} accounts")
+        return attempted
+
+    def _stats_one(self, account_id: int, scrapers: dict) -> None:
+        """Sample one account across every site that carries it.
+
+        `stats_checked_at` is stamped whatever happens, success or failure,
+        for the same reason `of_checked_at` is: a batch that only stamps on
+        success re-selects whatever keeps failing on every run and never
+        reaches the rest of the index.
+        """
+
+        with db_session() as session:
+            account = session.get(OnlyFansAccount, account_id)
+
+            if account is None:
+                return
+
+            now = utcnow()
+
+            for source in account.sources:
+                scraper = scrapers.get(source.site)
+
+                if scraper is None:
+                    continue
+
+                try:
+                    videos = scraper.account_videos(source.site_handle, 1) or []
+                except Exception as exc:
+                    logger.debug(
+                        f"OnlyFans: {source.site} gave no feed for "
+                        f"{source.site_handle}: {exc}"
+                    )
+                    continue
+
+                # Only videos the site actually put a number on. Counting a
+                # missing view count as zero would make a site that does not
+                # publish them look like a site nobody watches.
+                counted = [video.views for video in videos if video.views is not None]
+
+                if not counted:
+                    continue
+
+                source.recent_views = sum(counted)
+                source.sampled_videos = len(counted)
+
+                session.add(
+                    OnlyFansAccountStat(
+                        account_id=account.id,
+                        site=source.site,
+                        captured_at=now,
+                        recent_views=source.recent_views,
+                        sampled_videos=source.sampled_videos,
+                        video_count=source.video_count,
+                    )
+                )
+
+            account.stats_checked_at = now
+            session.commit()
+
+    def rescore(self) -> int:
+        """Recompute every account's popularity and trending score.
+
+        Wholesale rather than incremental, and that is what makes it cheap:
+        both scores are *relative*, so one account's new figures move everyone
+        else's rank anyway. Roughly two queries and a sort over the index.
+
+        Returns the number of accounts given a popularity score.
+        """
+
+        with db_session() as session:
+            rows = session.execute(
+                select(
+                    OnlyFansAccountSource.account_id,
+                    OnlyFansAccountSource.site,
+                    OnlyFansAccountSource.recent_views,
+                ).where(OnlyFansAccountSource.recent_views.is_not(None))
+            ).all()
+
+            if not rows:
+                logger.debug("OnlyFans: nothing sampled yet, nothing to score")
+                return 0
+
+            # NORMALISED WITHIN EACH SITE BEFORE ANYTHING IS COMBINED, and
+            # this is not a refinement. The five sites have wildly different
+            # traffic; on raw view counts the biggest one dictates the entire
+            # ranking and a performer carried only by the small sites can
+            # never place, however well they do there.
+            per_site: dict[str, list[int]] = {}
+
+            for _, site, views in rows:
+                per_site.setdefault(site, []).append(views)
+
+            for values in per_site.values():
+                values.sort()
+
+            ranked: dict[int, list[float]] = {}
+
+            for account_id, site, views in rows:
+                ranked.setdefault(account_id, []).append(
+                    _percentile(per_site[site], views)
+                )
+
+            trending = self._trending_deltas(session)
+            scored = self._apply_scores(session, ranked, trending)
+
+            # Pruned here rather than in its own job: this is the only thing
+            # that reads the series, so it is the only thing that knows what
+            # is safe to drop. The table grows by (accounts x sites) per pass
+            # and would otherwise grow forever.
+            session.execute(
+                delete(OnlyFansAccountStat).where(
+                    OnlyFansAccountStat.captured_at
+                    < utcnow() - timedelta(days=self.settings.stats_retention_days)
+                )
+            )
+            session.commit()
+
+        logger.info(f"OnlyFans: scored {scored} accounts")
+        return scored
+
+    def _trending_deltas(self, session) -> dict[int, float]:
+        """How much each account's sampled views grew over the trailing week.
+
+        Paired per site and only where BOTH ends exist. A site that was not
+        reachable when one of the two snapshots was taken contributes nothing
+        rather than contributing a collapse -- which is the whole reason the
+        series is stored per site instead of pre-summed.
+        """
+
+        window = self.settings.trending_window_days
+        now = utcnow()
+        older_than = now - timedelta(days=window)
+        # A floor as well as a ceiling: without one, an account measured for
+        # the first time three months ago and again today would read as a
+        # week's growth.
+        newer_than = now - timedelta(days=window * 3)
+
+        # The earliest snapshot still inside the window, per account per site.
+        earliest = (
+            select(
+                OnlyFansAccountStat.account_id,
+                OnlyFansAccountStat.site,
+                func.min(OnlyFansAccountStat.captured_at).label("captured_at"),
+            )
+            .where(
+                OnlyFansAccountStat.captured_at <= older_than,
+                OnlyFansAccountStat.captured_at >= newer_than,
+                OnlyFansAccountStat.recent_views.is_not(None),
+            )
+            .group_by(OnlyFansAccountStat.account_id, OnlyFansAccountStat.site)
+            .subquery()
+        )
+
+        before: dict[tuple[int, str], int] = {
+            (row.account_id, row.site): row.recent_views
+            for row in session.execute(
+                select(
+                    OnlyFansAccountStat.account_id,
+                    OnlyFansAccountStat.site,
+                    OnlyFansAccountStat.recent_views,
+                ).join(
+                    earliest,
+                    (OnlyFansAccountStat.account_id == earliest.c.account_id)
+                    & (OnlyFansAccountStat.site == earliest.c.site)
+                    & (OnlyFansAccountStat.captured_at == earliest.c.captured_at),
+                )
+            ).all()
+        }
+
+        if not before:
+            return {}
+
+        deltas: dict[int, float] = {}
+
+        for account_id, site, views in session.execute(
+            select(
+                OnlyFansAccountSource.account_id,
+                OnlyFansAccountSource.site,
+                OnlyFansAccountSource.recent_views,
+            ).where(OnlyFansAccountSource.recent_views.is_not(None))
+        ).all():
+            was = before.get((account_id, site))
+
+            if was is None:
+                continue
+
+            # DAMPED BY THE BASE IT GREW FROM. On absolute delta a huge back
+            # catalogue wins every week without doing anything interesting;
+            # this asks "how much did it grow relative to its own size",
+            # which is what puts a small account that doubled above a large
+            # one that moved a percent. The constant stops a performer with
+            # almost no views turning a handful into an enormous ratio.
+            deltas[account_id] = deltas.get(account_id, 0.0) + (
+                (views - was) / (was + _TRENDING_FLOOR)
+            )
+
+        return deltas
+
+    def _apply_scores(
+        self,
+        session,
+        ranked: dict[int, list[float]],
+        trending: dict[int, float],
+    ) -> int:
+        """Write both scores onto the accounts."""
+
+        # Rank-normalised too, so the two scores are on one scale and a rail
+        # can be read as a percentile in both cases.
+        trend_sorted = sorted(trending.values())
+        scored = 0
+
+        # EVERY account, not just the measured ones. Walking the whole table is
+        # what lets a score be CLEARED: an account whose sites stopped
+        # reporting view counts has to drop out of the rails, and a pass that
+        # only visited the measured ones could never do that -- it would keep
+        # whatever rank it was last given, forever, with nothing behind it.
+        #
+        # Two columns rather than whole objects, because `sources` is a
+        # selectin relationship: loading the entities here would fetch every
+        # source row for every account in the index to read one integer.
+        updates = []
+
+        for account_id, source_count in session.execute(
+            select(OnlyFansAccount.id, OnlyFansAccount.source_count)
+        ).all():
+            sites = ranked.get(account_id)
+
+            if not sites:
+                updates.append(
+                    {
+                        "id": account_id,
+                        "popularity_score": None,
+                        "trending_score": None,
+                    }
+                )
+                continue
+
+            demand = sum(sites) / len(sites)
+
+            # SATURATING, AND KEPT SMALL ON PURPOSE. `source_count` tops out
+            # at five and gets there fast, so weighted any higher it stops
+            # being a tie-breaker and starts being the ranking -- and then
+            # every five-site account outranks a two-site one that is
+            # genuinely surging.
+            breadth = min(source_count, 5) / 5
+
+            updates.append(
+                {
+                    "id": account_id,
+                    "popularity_score": 0.85 * demand + 0.15 * breadth,
+                    "trending_score": (
+                        _percentile(trend_sorted, trending[account_id])
+                        if account_id in trending
+                        else None
+                    ),
+                }
+            )
+            scored += 1
+
+        if updates:
+            # One executemany keyed on the primary key, rather than a
+            # statement per account. The index is tens of thousands of rows
+            # and this runs on an interval.
+            session.execute(update(OnlyFansAccount), updates)
+
+        return scored
 
     # --- Enrichment ---------------------------------------------------------
 
@@ -530,6 +873,34 @@ class OnlyFansService:
 STALE_AFTER = 3600
 
 
+#: Added to the denominator when a growth rate is computed, so that a performer
+#: who went from two views to twelve does not outrank the whole index. Roughly
+#: "a page nobody watched" -- below this, a delta is noise rather than a trend.
+_TRENDING_FLOOR = 500
+
+
+def _percentile(sorted_values: list, value) -> float:
+    """Where `value` falls in `sorted_values`, as 0.0 to 1.0.
+
+    `bisect_left` rather than an enumerate, so equal values get equal scores
+    -- three accounts on the same view count must not be ranked against each
+    other by whatever order the database happened to return them in.
+
+    Clamped, because `bisect_left` returns `len` for anything past the end and
+    that is 1.25 on a five-element distribution, not 1.0. Every caller here
+    passes a value drawn from the same list, so it cannot happen today -- but
+    a score above 1 is silent: it stores fine, sorts fine, and quietly breaks
+    the one property the rails rely on, that both scores are percentiles on
+    one scale.
+    """
+
+    if len(sorted_values) < 2:
+        return 1.0
+
+    rank = min(bisect.bisect_left(sorted_values, value), len(sorted_values) - 1)
+    return rank / (len(sorted_values) - 1)
+
+
 def _is_end_of_index(exc: Exception) -> bool:
     """Whether a page request failed because there are no more pages.
 
@@ -658,6 +1029,35 @@ def scheduled_enrich() -> None:
         logger.error(f"OnlyFans account enrichment failed: {exc}")
 
 
+def scheduled_stats() -> None:
+    """Sample view counts, then rescore the whole index.
+
+    One job rather than two. Scoring reads what sampling writes, and the
+    scores are relative -- so a rescore that ran on its own schedule would
+    spend most of its runs recomputing the same ranking from the same
+    figures, and the one run that mattered would be whichever happened to
+    land after a batch.
+    """
+
+    service = _shared()
+
+    if not service.initialized or not service.settings.stats_enabled:
+        return
+
+    try:
+        service.stats_batch()
+    except Exception as exc:
+        logger.error(f"OnlyFans view sampling failed: {exc}")
+        # Falls through to the rescore deliberately: a batch that died
+        # halfway still committed everything it reached, and those figures
+        # should count.
+
+    try:
+        service.rescore()
+    except Exception as exc:
+        logger.error(f"OnlyFans scoring failed: {exc}")
+
+
 def index_is_empty() -> bool:
     """Whether the index has nothing in it.
 
@@ -691,6 +1091,16 @@ def index_summary() -> dict[str, int]:
                     select(func.count())
                     .select_from(OnlyFansAccount)
                     .where(OnlyFansAccount.of_username.is_not(None))
+                ).scalar_one(),
+                "ranked": session.execute(
+                    select(func.count())
+                    .select_from(OnlyFansAccount)
+                    .where(OnlyFansAccount.popularity_score.is_not(None))
+                ).scalar_one(),
+                "trending": session.execute(
+                    select(func.count())
+                    .select_from(OnlyFansAccount)
+                    .where(OnlyFansAccount.trending_score.is_not(None))
                 ).scalar_one(),
             }
     except Exception:

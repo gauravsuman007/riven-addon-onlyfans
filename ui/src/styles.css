@@ -441,6 +441,66 @@
     margin-left: 0.35rem;
 }
 
+/* --- recommendation rails ---------------------------------------------- */
+
+.ofx-rail {
+    margin-bottom: 2rem;
+}
+
+.ofx-rail-head {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 0.5rem 0.75rem;
+    margin-bottom: 0.75rem;
+}
+
+.ofx-rail h2 {
+    font-size: 1.1rem;
+    font-weight: 500;
+    letter-spacing: -0.01em;
+    margin: 0;
+}
+
+/* Pushed to the far end so the rail's own controls do not read as part of
+   its title, however long or short that title is. */
+.ofx-rail-actions {
+    margin-left: auto;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+}
+
+/*
+    A strip that scrolls sideways rather than a grid that wraps. A rail is a
+    fixed, ranked selection -- the tenth most popular performer is a different
+    claim from the first -- and wrapping it into rows destroys the ordering
+    the ranking exists to express.
+*/
+.ofx-rail-strip {
+    display: flex;
+    gap: 0.75rem;
+    overflow-x: auto;
+    /* The cards have a focus ring and a hover lift; without this the top and
+       bottom of both are clipped by the scroll container. */
+    padding: 0.25rem 0.25rem 0.75rem;
+    margin: -0.25rem -0.25rem -0.75rem;
+    scroll-snap-type: x proximity;
+    scrollbar-width: thin;
+}
+
+.ofx-rail-item {
+    flex: 0 0 auto;
+    width: 8.5rem;
+    scroll-snap-align: start;
+}
+
+@media (min-width: 768px) {
+    .ofx-rail-item {
+        width: 10rem;
+    }
+}
+
 /* --- media tiles ------------------------------------------------------- */
 
 .ofx-tiles {

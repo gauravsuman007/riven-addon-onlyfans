@@ -122,6 +122,39 @@ class OnlyFansAccount(Base):
         sqlalchemy.Integer, default=0, index=True, server_default="0"
     )
 
+    # --- ranking ------------------------------------------------------------
+    #
+    # Both are STORED rather than computed per request, and both are indexed,
+    # because a rail is an ORDER BY over tens of thousands of rows and the
+    # inputs live in another table. Recomputed wholesale by `rescore`, which
+    # is cheap precisely because it is not incremental.
+    #
+    # Nullable, and the rails filter nulls out rather than treating them as
+    # zero: before the first stats pass every account is unscored, and an
+    # unscored account ranked last is a lie about a performer nobody has
+    # measured yet.
+
+    #: A level: how much demand this performer's archived content sees, blended
+    #: across sites after each site's figures are rank-normalised. See
+    #: `service.rescore` for why the normalisation is not optional.
+    popularity_score: Mapped[float | None] = mapped_column(
+        sqlalchemy.Float, nullable=True, index=True
+    )
+
+    #: A derivative: how fast that demand is growing, against a snapshot about
+    #: a week old. Needs two passes before it means anything, so it stays null
+    #: for the first week the feature is on.
+    trending_score: Mapped[float | None] = mapped_column(
+        sqlalchemy.Float, nullable=True, index=True
+    )
+
+    #: Stamped on every attempt, success or failure, for the same reason
+    #: `of_checked_at` is: without it the batch re-selects the accounts that
+    #: keep failing and never reaches the rest of the index.
+    stats_checked_at: Mapped[datetime | None] = mapped_column(
+        sqlalchemy.DateTime(timezone=True), nullable=True
+    )
+
     # Set by the user, cleared by the user. Never touched by a sync, for the
     # same reason `Studio.saved` is not: a weekly refresh that dropped saved
     # accounts is indistinguishable from data loss.
@@ -190,6 +223,27 @@ class OnlyFansAccountSource(Base):
         sqlalchemy.Integer, nullable=True
     )
 
+    # WHAT THIS SITE'S AUDIENCE ACTUALLY WATCHES, and the input every rail is
+    # built from. The sites report a view count per video and the scrapers
+    # already parse it into `DirectVideo.views`; nothing used to keep it.
+    #
+    # A SAMPLE, NOT A TOTAL, and the name says so. Summing every video of
+    # every performer would be a request per page per account per site --
+    # hundreds of thousands of requests for a figure that ranks the same. This
+    # is the newest page, which is 12-25 videos, and it is the right sample
+    # anyway: a rail called Trending should not be dominated by a back
+    # catalogue nobody is watching.
+    recent_views: Mapped[int | None] = mapped_column(
+        sqlalchemy.Integer, nullable=True
+    )
+
+    #: How many videos that sum covered. Without it a page of 25 and a page of
+    #: 3 are indistinguishable, and the site that pages smaller would look
+    #: less popular than it is.
+    sampled_videos: Mapped[int | None] = mapped_column(
+        sqlalchemy.Integer, nullable=True
+    )
+
     refreshed_at: Mapped[datetime | None] = mapped_column(
         sqlalchemy.DateTime(timezone=True), nullable=True
     )
@@ -208,6 +262,63 @@ class OnlyFansAccountSource(Base):
 
     def __repr__(self) -> str:
         return f"<OnlyFansAccountSource {self.site}:{self.site_handle}>"
+
+
+class OnlyFansAccountStat(Base):
+    """One site's figures for one account, at one moment.
+
+    THE ONLY TABLE HERE THAT IS A TIME SERIES, and it exists because trending
+    is not a quantity anyone can scrape. Popularity is a level and the sites
+    report it; trending is a derivative, so it needs a yesterday to subtract.
+    Without this table no amount of scraping produces a Trending rail.
+
+    KEPT PER SITE, NOT PRE-SUMMED. A site that goes dark for a week would
+    otherwise show up as every performer on it collapsing at once, and after
+    the fact a pre-aggregated row cannot be told apart from a real decline.
+    Per-site rows let a missing site be skipped instead of counted as zero --
+    the same "absent and empty are different answers" stance as
+    `OnlyFansAccountSource.video_count`.
+    """
+
+    __tablename__ = "OnlyFansAccountStat"
+
+    id: Mapped[int] = mapped_column(sqlalchemy.Integer, primary_key=True)
+
+    account_id: Mapped[int] = mapped_column(
+        sqlalchemy.Integer,
+        sqlalchemy.ForeignKey(f"{SCHEMA}.OnlyFansAccount.id", ondelete="CASCADE"),
+        index=True,
+    )
+
+    site: Mapped[str] = mapped_column(sqlalchemy.String, index=True)
+
+    captured_at: Mapped[datetime] = mapped_column(
+        sqlalchemy.DateTime(timezone=True), default=utcnow, index=True
+    )
+
+    #: The sample described on `OnlyFansAccountSource.recent_views`, frozen at
+    #: `captured_at`. Comparing two of these is the whole of trending.
+    recent_views: Mapped[int | None] = mapped_column(
+        sqlalchemy.Integer, nullable=True
+    )
+    sampled_videos: Mapped[int | None] = mapped_column(
+        sqlalchemy.Integer, nullable=True
+    )
+    video_count: Mapped[int | None] = mapped_column(
+        sqlalchemy.Integer, nullable=True
+    )
+
+    __table_args__ = (
+        # The lookup `rescore` does for every account: this account, this
+        # site, nearest to a week ago. Without it that is a sequential scan
+        # per account per site.
+        Index(
+            "ix_onlyfans_stat_account_site_time",
+            "account_id",
+            "site",
+            "captured_at",
+        ),
+    )
 
 
 class OnlyFansSyncRun(Base):

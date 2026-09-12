@@ -98,6 +98,66 @@ class OnlyFansModel(BaseModel):
         ge=300,
         description="How often to run the profile enrichment pass, in seconds",
     )
+    stats_enabled: bool = Field(
+        default=True,
+        description=(
+            "Sample how many views each performer's newest videos have on "
+            "the archive sites, and rank the index from it. This is what the "
+            "Trending, Rising, Popular and New rows on the OnlyFans page are "
+            "built from; with it off those rows disappear and the page falls "
+            "back to a plain alphabetical index. None of this comes from "
+            "OnlyFans itself -- the platform publishes no chart, no "
+            "directory and no popularity figure of any kind."
+        ),
+    )
+    stats_batch_size: int = Field(
+        default=150,
+        ge=1,
+        le=1000,
+        description=(
+            "Accounts to sample per run, one request per site each. Sized "
+            "against the interval below rather than the index: the pass is a "
+            "rotation that keeps coming back, not a backlog to clear once."
+        ),
+    )
+    stats_interval: int = Field(
+        default=60 * 15,
+        ge=300,
+        description="How often to sample view counts and rescore, in seconds",
+    )
+    stats_max_age_days: int = Field(
+        default=6,
+        ge=1,
+        le=90,
+        description=(
+            "How old an account's figures may get before it is sampled "
+            "again. Under the trending window below, or an account is never "
+            "measured twice inside a window and can never be seen to move."
+        ),
+    )
+    trending_window_days: int = Field(
+        default=7,
+        ge=1,
+        le=60,
+        description=(
+            "How far back Trending compares against. Growth is measured "
+            "against the oldest snapshot this far back, so nothing trends "
+            "until the index has been sampled twice this far apart -- the "
+            "row is empty for about a week after switching this on, which is "
+            "the feature working rather than failing."
+        ),
+    )
+    stats_retention_days: int = Field(
+        default=90,
+        ge=7,
+        le=730,
+        description=(
+            "How long to keep the view-count history. It grows by one row "
+            "per account per site per pass and nothing but Trending reads "
+            "it, so anything past the trending window is only kept in case "
+            "the window is widened later."
+        ),
+    )
     onlyfans_enrich: bool = Field(
         default=True,
         description=(

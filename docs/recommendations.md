@@ -1,7 +1,22 @@
-# Recommendation rails — design notes
+# Recommendation rails
 
-Not implemented. This is the plan for turning the flat, arbitrarily-ordered
-account index into ranked rails (Trending, Most popular, Rising, New).
+**Implemented.** This was the design note; it now describes what is there, with
+the reasoning kept because the reasoning is the part that is easy to lose.
+
+What shipped, and where:
+
+| Piece | Lives in |
+| --- | --- |
+| Sampled view counts per site | `OnlyFansAccountSource.recent_views` |
+| The time series | `OnlyFansAccountStat` |
+| Both scores | `OnlyFansAccount.popularity_score`, `.trending_score` |
+| The sampling pass | `OnlyFansService.stats_batch` |
+| The scoring pass | `OnlyFansService.rescore` |
+| The rails | `router._ORDERS`, via `GET /accounts?order=` |
+| The page | `ui/src/Grid.svelte`, `ui/src/Rail.svelte` |
+
+Two things deliberately left undone, both at the end of this file: tag capture,
+and therefore "more like this".
 
 Read `AGENTS.md` first; everything below lives under the constraints it
 describes, in particular the KVS shortcut and the onlyfans.com API section.
@@ -160,13 +175,30 @@ What works here is content-based similarity —
 "More like this" on the detail page is the useful form. A personalised home
 feed is not reachable with one user's data and should not be attempted.
 
-## Suggested order of work
+## What it looks like on a fresh index
 
-1. Persist `DirectVideo.views` per source. Nothing else needs to change to
-   make **Most popular** real.
-2. Probe the KVS windowed sorts across all five sites; record per site what
-   actually works, the way the scrapers record everything else.
-3. Add `OnlyFansAccountStat` + snapshot write + prune. Unblocks **Trending**
-   and **Rising**.
-4. Scoring columns, indexes, and the rails in the UI.
-5. Tag capture, then "more like this".
+Nothing is instant, and the page is built to say so by omission rather than by
+apology. A rail with no rows renders nothing at all -- no heading, no empty
+strip -- because a heading over a gap reads as a broken feature.
+
+- **Immediately:** New to the index, Carried by the most sites, and the random
+  row. All three are derivable from the index alone.
+- **After the first sampling passes:** Most popular. The pass is a rotation of
+  `stats_batch_size` accounts every `stats_interval`, so how long depends on
+  the size of the index.
+- **After about a week:** Trending and Rising. They compare against a snapshot
+  `trending_window_days` old, and that snapshot has to be taken first. There is
+  no way to shorten this and no way to fake it -- it is the one thing a time
+  series cannot give you on day one.
+
+## Still not done
+
+1. **Probe the KVS windowed sorts** (`most_viewed`, weekly/monthly variants)
+   across all five sites, and record per site what actually works. Nothing
+   depends on it now that sampling works, but a site-computed weekly figure
+   would be cheaper and less noisy than the sampled delta.
+2. **Tag capture.** No scraper records the tags or categories on a video, so
+   there is nothing to compute content similarity from.
+3. **"More like this"** on the detail page, once (2) exists. Collaborative
+   filtering stays off the table: one user, no interaction matrix. A
+   personalised home feed is not reachable and should not be attempted.
