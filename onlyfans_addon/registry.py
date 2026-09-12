@@ -19,8 +19,8 @@ from dataclasses import dataclass
 
 from loguru import logger
 
-from program.services.directscrapers.base import DirectScraper
-from program.services.directscrapers.plugins import discover_plugins
+from program.services.scraper_plugins.base import DirectScraper
+from program.services.scraper_plugins.plugins import discover_plugins
 from onlyfans_addon.config import plugin_dir
 from onlyfans_addon.config import settings as addon_settings
 

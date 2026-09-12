@@ -21,7 +21,7 @@ from loguru import logger
 from lxml import html as lxml_html
 from curl_cffi import requests as curl_requests
 
-from program.services.directscrapers.base import (
+from program.services.scraper_plugins.base import (
     DirectAccount,
     DirectScraper,
     DirectSource,
