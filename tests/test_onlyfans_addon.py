@@ -191,16 +191,26 @@ def test_every_rail_has_an_ordering():
     check("every rail has a heading", all(rail.title.strip() for rail in RAILS))
     check("at least one rail reaches a television", any(rail.order for rail in RAILS if rail.tv))
 
-    # The television builds its sections by walking RAILS. Asserted on the
-    # source because the alternative is a live database: what must not happen
-    # is `tv/browse` growing its own list of rows, which is exactly the shape
-    # the drift took last time.
+    # The television builds its sections by walking the shared list --
+    # through `arranged()`, which is that list in the viewer's saved order.
+    # Asserted on the source because the alternative is a live database: what
+    # must not happen is `tv/browse` growing its own list of rows, which is
+    # exactly the shape the drift took last time.
     source = inspect.getsource(tv.tv_browse)
 
     check(
         "the television's screen is built from the shared list",
-        "RAILS" in source,
-        "tv_browse no longer walks RAILS",
+        "arranged()" in source,
+        "tv_browse no longer walks the shared rail list",
+    )
+
+    # And through the SAME arrangement the web page uses. A television that
+    # walked RAILS directly would be correct and would still be the version
+    # behind: it would ignore every row the viewer had moved or switched off.
+    check(
+        "the television honours the saved arrangement",
+        "RAILS" not in source,
+        "tv_browse reads the unarranged list",
     )
 
     # STRING LITERALS, not the raw text. A comment is free to say "empty until

@@ -35,7 +35,7 @@ from loguru import logger
 
 from program.services.vpn import STREAMING, VpnUnavailable, vpn
 
-from onlyfans_addon.rails import RAILS
+from onlyfans_addon.rails import arranged
 from onlyfans_addon.scraper_api.base import BROWSER_HEADERS
 
 router = APIRouter(prefix="/tv", tags=["onlyfans-tv"])
@@ -46,10 +46,11 @@ router = APIRouter(prefix="/tv", tags=["onlyfans-tv"])
 #: decoding two hundred avatars at once.
 PAGE = 60
 
-#: Videos asked of each site for one performer. One page per site, not all of
-#: them: a performer can carry hundreds across four sites, and a television
-#: that fetches the lot before drawing anything looks broken.
-PER_SITE = 24
+#: One press of "Load more" on the television. Ten, because every card is a
+#: still fetched from an archive host and a remote scrolls by repetition --
+#: the old behaviour drew up to ninety-six at once and could not be got
+#: through.
+TV_PAGE = 10
 
 
 def _thumbnail(site: str, url: str | None) -> str:
@@ -242,7 +243,7 @@ def tv_browse(
     sections: list[dict[str, Any]] = []
 
     if not browsing:
-        for rail in RAILS:
+        for rail in arranged():
             if not rail.tv:
                 continue
 
@@ -293,15 +294,30 @@ def tv_browse(
 
 
 @router.get("/detail", operation_id="onlyfans_tv_detail")
-def tv_detail(id: Annotated[str, Query(min_length=1, max_length=128)]) -> dict[str, Any]:
-    """One performer: who they are, then their videos grouped by site.
+def tv_detail(
+    id: Annotated[str, Query(min_length=1, max_length=128)],
+    choice: Annotated[str | None, Query(max_length=64)] = None,
+    cursor: Annotated[str | None, Query(max_length=32)] = None,
+) -> dict[str, Any]:
+    """One performer: who they are, then one site's videos, ten at a time.
 
-    EVERY SITE IS FETCHED HERE, where the web page makes each one a button the
-    viewer presses. That difference is the remote: a page of buttons that each
-    load a section is fine with a pointer and tedious with a directional pad,
-    and the sections are what the viewer came for. A site that fails is named
-    in the facts rather than raising -- the other three still have videos on
-    them, and an error page would throw those away too.
+    IT USED TO FETCH EVERY SITE AND DRAW THE LOT. That was wrong in the way
+    that is easy to miss from a desk: a performer carried by four archives
+    produced four sections and up to ninety-six tiles, every one of them a
+    still fetched from a different host, on a device that scrolls by pressing
+    a button repeatedly. The page took seconds to assemble and could not be
+    got through. The web page never had that problem because each site is a
+    button there -- the viewer asks for one.
+
+    So the television asks for one too. Without a `choice` this answers the
+    performer and the list of sites to pick from and fetches NOTHING; with
+    one, it fetches that site alone.
+
+    `cursor` is how many cards to show, and it is deliberately a count rather
+    than an offset: a television has no way to append to a page, so "Load
+    more" is a link that re-renders the screen with more on it. The encoding
+    is private to this file -- the other side hands back whatever string it
+    was given -- so this can become a keyset later without telling anyone.
     """
 
     from onlyfans_addon.router import account_videos, get_account
@@ -334,58 +350,65 @@ def tv_detail(id: Annotated[str, Query(min_length=1, max_length=128)]) -> dict[s
     if figures:
         lines.append(" · ".join(figures))
 
+    # How many cards this screen shows. Clamped at both ends: below, so a
+    # cursor of zero cannot ask for an empty screen; above, so a hand-edited
+    # URL cannot ask one archive for two hundred pages.
+    try:
+        show = max(TV_PAGE, min(int(cursor or TV_PAGE), 200))
+    except ValueError:
+        show = TV_PAGE
+
+    # The sites this performer is carried by, biggest first -- the same
+    # ordering the web page's buttons use, and for the same reason: the
+    # archive with four hundred videos is a better first press than the one
+    # with one.
+    choices = [
+        {
+            "id": source.site,
+            "label": source.site,
+            "note": _tally(source),
+            "active": source.site == choice,
+        }
+        for source in account.sources
+    ]
+
     sections: list[dict[str, Any]] = []
-    failed: list[str] = []
+    more: str | None = None
 
-    for source in account.sources:
+    if choice is None:
+        lines.append("Pick a site to load this performer's videos from.")
+    elif not any(entry["id"] == choice for entry in choices):
+        # Bookmarked from before, or a source that has since gone. Named
+        # rather than silently falling back to another site's videos, which
+        # would look like the right ones.
+        lines.append(f"{choice} does not carry this performer.")
+    else:
         try:
-            videos = account_videos(id, site=source.site, page=1)
+            videos = _videos_upto(id, choice, show + 1)
         except Exception as exc:
-            logger.debug(f"OnlyFans TV: {source.site} failed for {id}: {exc}")
-            failed.append(source.site)
-            continue
+            logger.debug(f"OnlyFans TV: {choice} failed for {id}: {exc}")
+            videos = []
+            lines.append(f"Could not read: {choice}")
 
-        if not videos:
-            continue
+        if len(videos) > show:
+            more = str(show + TV_PAGE)
 
-        sections.append(
-            {
-                "title": source.site,
-                "cards": [
-                    {
-                        # Opaque to the television and handed back to
-                        # `tv/play` verbatim. A colon is safe: the id travels
-                        # in a query string, never as a path segment.
-                        "id": f"{video.site}:{video.video_id}",
-                        "title": video.title,
-                        "image": _thumbnail(video.site, video.thumbnail),
-                        "duration": int(video.duration or 0),
-                        "badges": [
-                            value
-                            for value in (
-                                str(video.resolution)
-                                if video.resolution
-                                else ("HD" if video.hd else ""),
-                                f"{int(video.views):,} views" if video.views else "",
-                            )
-                            if value
-                        ],
-                        "action": "play",
-                    }
-                    for video in videos[:PER_SITE]
-                ],
-            }
-        )
-
-    if failed:
-        lines.append(f"Could not read: {', '.join(sorted(failed))}")
+        if videos:
+            sections.append({"title": choice, "cards": _video_cards(videos[:show])})
+        elif not lines or not lines[-1].startswith("Could not read"):
+            lines.append(f"{choice} has nothing for this performer.")
 
     return {
         "title": account.display_name,
         "subtitle": f"@{account.of_username or account.handle}",
         "image": account.avatar_url or "",
         "lines": lines,
+        "choices": choices,
         "sections": sections,
+        # A cursor, or nothing at the end. The other side draws a "Load more"
+        # only when there is one, so a site that answered short does not get
+        # a button that fetches the same screen again.
+        "more": more,
     }
 
 
@@ -416,3 +439,81 @@ def tv_play(id: Annotated[str, Query(min_length=3, max_length=256)]) -> dict[str
         ),
         "content_type": "video/mp4",
     }
+
+
+def _tally(source) -> str:
+    """One site's figures, or nothing when it never stated any.
+
+    A blank is "this site did not say", which is a different fact from zero.
+    Three of the archives state their counts only on the performer's own page,
+    so a source nobody has opened yet legitimately has none.
+    """
+
+    figures = [
+        f"{value:,} {label}"
+        for value, label in (
+            (source.video_count, "videos"),
+            (source.image_count, "photos"),
+        )
+        if value
+    ]
+
+    return " · ".join(figures)
+
+
+def _videos_upto(handle: str, site: str, wanted: int) -> list:
+    """Enough of one site's videos to fill the screen, and one more.
+
+    The extra is what decides whether "Load more" is drawn at all: a site that
+    answered exactly a screenful and a site that has more look identical
+    without it, and offering a button that re-renders the same screen is worse
+    than offering none.
+    """
+
+    from onlyfans_addon.router import account_videos
+
+    collected: list = []
+    page = 1
+
+    while len(collected) < wanted:
+        batch = account_videos(handle, site=site, page=page)
+
+        if not batch:
+            break
+
+        collected.extend(batch)
+        page += 1
+
+        # These archives run to a handful of pages per performer; the guard is
+        # against a site that answers the same page forever, not against a
+        # long catalogue.
+        if page > 12:
+            break
+
+    return collected
+
+
+def _video_cards(videos: list) -> list[dict[str, Any]]:
+    return [
+        {
+            # Opaque to the television and handed back to `tv/play`
+            # verbatim. A colon is safe: the id travels in a query string,
+            # never as a path segment.
+            "id": f"{video.site}:{video.video_id}",
+            "title": video.title,
+            "image": _thumbnail(video.site, video.thumbnail),
+            "duration": int(video.duration or 0),
+            "badges": [
+                value
+                for value in (
+                    str(video.resolution)
+                    if video.resolution
+                    else ("HD" if video.hd else ""),
+                    f"{int(video.views):,} views" if video.views else "",
+                )
+                if value
+            ],
+            "action": "play",
+        }
+        for video in videos
+    ]

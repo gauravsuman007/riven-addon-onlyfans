@@ -114,3 +114,40 @@ export const photoUrl = (site, handle, page, index, thumb = false) =>
 
 export const streamUrl = (site, videoId, index = 0) =>
     `${base}/stream?site=${encodeURIComponent(site)}&video_id=${encodeURIComponent(videoId)}&index=${index}`;
+
+/*
+    THE RAIL LAYOUT IS THE HOST'S, not this add-on's.
+
+    So these two go to `/api/v1/rails/...` directly rather than through
+    `base`, which is this add-on's own mount. There is one stored arrangement
+    per page and the television reads the same one; a copy kept here would be
+    a second answer that the two surfaces could disagree about.
+
+    The page key is the host's shape for an add-on's own page: "x/" and the
+    add-on's key.
+*/
+const LAYOUT = "/api/v1/rails/x/onlyfans";
+
+export async function getLayout() {
+    try {
+        const response = await fetch(LAYOUT);
+        if (!response.ok) return [];
+        return (await response.json()).rails ?? [];
+    } catch {
+        // An unreachable layout is an UNARRANGED page, never an empty one.
+        return [];
+    }
+}
+
+export async function saveLayout(rails) {
+    try {
+        const response = await fetch(LAYOUT, {
+            method: "PUT",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify(rails)
+        });
+        return response.ok;
+    } catch {
+        return false;
+    }
+}

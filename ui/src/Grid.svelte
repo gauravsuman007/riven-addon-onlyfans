@@ -17,6 +17,7 @@
     import { listAccounts, listRails } from "./api.js";
     import AccountCard from "./AccountCard.svelte";
     import Rail from "./Rail.svelte";
+    import RailEditor from "./RailEditor.svelte";
 
     let { navigate } = $props();
 
@@ -59,10 +60,19 @@
     */
     let rails = $state([]);
 
+    /*
+        Re-read rather than re-rendered from the draft after an arrangement is
+        saved. The backend is what decides the final order -- it appends rows
+        the saved layout never knew about -- so trusting the draft here would
+        show one order now and a different one on the next load.
+    */
+    async function loadRails() {
+        const result = await listRails();
+        rails = Array.isArray(result) ? result : [];
+    }
+
     $effect(() => {
-        listRails().then((result) => {
-            rails = Array.isArray(result) ? result : [];
-        });
+        loadRails();
     });
 
     const query = $derived(search.trim());
@@ -199,6 +209,10 @@
         The random row is drawn separately because it is the only one with
         controls of its own -- shuffle, and the way into the full grid.
     -->
+    <div class="ofx-controls">
+        <RailEditor {rails} onsaved={loadRails} />
+    </div>
+
     {#each rails.filter((rail) => rail.order !== "random") as rail (rail.order)}
         <Rail title={rail.title} note={rail.note} order={rail.order} {navigate} />
     {/each}

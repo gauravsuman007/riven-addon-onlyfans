@@ -54,3 +54,59 @@ RAILS: tuple[Rail, ...] = (
     Rail("carried", "Carried by the most sites"),
     Rail("random", "Something else", tv=False),
 )
+
+
+#: The page this add-on's rows are arranged under, in the host's vocabulary.
+#: It is the add-on's own screen, so it is the add-on's key behind "x/" --
+#: the same shape the host uses for every add-on page.
+PAGE = "onlyfans"
+
+
+def arranged() -> tuple[Rail, ...]:
+    """The rails, in the order the viewer put them, with the hidden ones gone.
+
+    THE SAME ARRANGEMENT THE WEB PAGE AND THE TELEVISION DRAW, because it is
+    the same stored list -- the host's `RailLayout` for page "x/onlyfans".
+    That is the point: arranging this add-on's landing page from a browser
+    rearranges it on the set in the living room too, which is what somebody
+    who moved a row would expect and what two hand-maintained orders can
+    never give.
+
+    A rail the layout has never heard of is APPENDED rather than dropped, so
+    a row added by an update appears for the people who have arranged their
+    page -- the ones who would most want it -- instead of being invisible to
+    exactly them. The mirror rule is in the host's `arrange()`; the two must
+    agree, and the shapes are small enough that they can be read side by side.
+
+    Never raises. The layout is a preference; a database that cannot answer
+    costs the viewer their arrangement for one page load, not the page.
+    """
+
+    try:
+        from program.db.db import db_session
+        from program.rails import layout_for
+
+        with db_session() as session:
+            saved = layout_for(session, f"x/{PAGE}")
+    except Exception:  # noqa: BLE001 -- see the docstring: never fatal.
+        return RAILS
+
+    if not saved:
+        return RAILS
+
+    by_key = {f"{PAGE}:{rail.order}": rail for rail in RAILS}
+    ordered: list[Rail] = []
+    placed: set[str] = set()
+
+    for record in saved:
+        placed.add(record.rail_key)
+        rail = by_key.get(record.rail_key)
+
+        if rail is not None and record.enabled:
+            ordered.append(rail)
+
+    for key, rail in by_key.items():
+        if key not in placed:
+            ordered.append(rail)
+
+    return tuple(ordered)

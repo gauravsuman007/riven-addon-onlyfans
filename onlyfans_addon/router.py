@@ -48,7 +48,7 @@ from onlyfans_addon.models import (
     OnlyFansAccountTerm,
     OnlyFansSyncRun,
 )
-from onlyfans_addon.rails import RAILS
+from onlyfans_addon.rails import PAGE as RAIL_PAGE, arranged
 from onlyfans_addon.scraper_api.base import BROWSER_HEADERS
 from onlyfans_addon.service import OnlyFansService, normalise_handle
 from onlyfans_addon.service import STALE_AFTER
@@ -278,8 +278,18 @@ def list_rails() -> list[dict[str, Any]]:
     """
 
     return [
-        {"order": rail.order, "title": rail.title, "note": rail.note, "tv": rail.tv}
-        for rail in RAILS
+        {
+            "order": rail.order,
+            "title": rail.title,
+            "note": rail.note,
+            "tv": rail.tv,
+            # The key the host's layout stores for this row, so the page's
+            # own rail editor can name it without inventing the prefix -- and
+            # so it cannot invent it WRONGLY, which would save an arrangement
+            # nothing ever reads.
+            "key": f"{RAIL_PAGE}:{rail.order}",
+        }
+        for rail in arranged()
     ]
 
 
