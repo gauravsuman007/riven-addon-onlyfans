@@ -68,13 +68,6 @@ _PLAY_MARKER = "icon-play"
 _MEDIA_HOST = "https://fapello.com"
 _VIDEO_HOST = "https://cdn.fapello.com"
 
-#: Paths under the root that are pages of the site rather than performers.
-_RESERVED = {
-    "hot", "forum", "welcome", "upload", "login", "signup", "tags", "random",
-    "search", "feed", "videos", "top-likes", "top-followers", "trending",
-    "daily-search-ranking", "assets", "content", "ajax", "terms", "privacy",
-    "dmca", "contact", "new",
-}
 
 
 class FapelloScraper(DirectScraper):
@@ -256,11 +249,32 @@ def _accounts(page: str, key: str) -> list[DirectAccount]:
             continue
 
         handle = match.group(1)
-        if handle in seen or handle in _RESERVED:
+        if handle in seen:
             continue
-        seen.add(handle)
 
-        images = link.xpath(".//img/@src")
+        # A PERFORMER IS IDENTIFIED BY THEIR OWN ARTWORK, not by the href.
+        # Every page on this site is one path segment deep, so the shape alone
+        # matches `/forum/`, `/report/`, `/search_v2/` and `/2257/` as readily
+        # as it matches a person -- a reserved-word list would need extending
+        # every time the site adds a page, and would be wrong silently.
+        #
+        # A real card's thumbnail is that performer's own first post, at
+        # `/content/<a>/<b>/<slug>/...`. Requiring the slug in the image path
+        # ties the card to the handle, so a site page (no such image) and a
+        # promoted card (artwork under `/assets/exclusive/`, linking out to
+        # onlyfans.com) both fall out without being enumerated.
+        avatar = next(
+            (
+                src
+                for src in link.xpath(".//img/@src")
+                if f"/content/{handle[0]}/{handle[1]}/{handle}/" in src
+            ),
+            None,
+        )
+        if not avatar:
+            continue
+
+        seen.add(handle)
         names = [text.strip() for text in link.xpath(".//text()") if text.strip()]
 
         accounts.append(
@@ -269,7 +283,7 @@ def _accounts(page: str, key: str) -> list[DirectAccount]:
                 handle=handle,
                 display_name=names[0] if names else _display(handle),
                 page_url=href,
-                avatar=images[0] if images else None,
+                avatar=avatar,
             )
         )
 
