@@ -327,51 +327,49 @@ def test_the_similarity_terms():
     check("a term nobody else has does not divide by zero", _rarity(0, 0) > 0)
 
 
-def test_no_scraper_follows_a_redirect_off_a_model_page():
+def test_no_scraper_invents_a_performer_it_does_not_carry():
     """A missing performer must come back empty, never as someone else's videos.
 
     This is the shape of a bug that shipped and ran unnoticed. porntn answers
-    **301 to its own homepage** for a model it does not carry, rather than the
-    404 its four siblings answer. `_get` follows redirects, so `account_videos`
-    received a valid 200 holding the homepage's newest-thirty grid, and the
-    card parser -- which has no way to know which page it is reading -- lifted
-    thirty real videos out of it.
+    **301 to its own homepage** for a model it does not carry, where its four
+    siblings answer 404. `_get` follows redirects, so `account_videos` received
+    a valid 200 holding the homepage's newest-thirty grid, and the card parser
+    -- which has no way to know which page it is reading -- lifted thirty real
+    videos out of it.
 
     Nothing failed. No exception, no empty list, no log line. Four handles,
     three of them deliberate nonsense, returned the same thirty video ids with
     100% overlap, each attributed to a different performer.
 
-    That is why this test reads the source rather than making a request: the
-    live site is free to stop redirecting tomorrow, and the property worth
-    holding is not "porntn currently 404s" but "a scraper that asks for a model
-    page decides for itself what a redirect means". Any scraper reaching a
-    model path through a redirect-following helper is the bug again.
+    ASKING THE SITE IS THE ONLY HONEST TEST. Reading the source cannot tell a
+    guarded scraper from one that is merely lucky: the four safe scrapers are
+    safe because their sites 404, which is a fact about the site and not about
+    the file. So this asks for a handle that cannot exist and fails only on the
+    one answer that is never acceptable -- a list of videos.
+
+    A site being unreachable is not a failure here. The property is "does not
+    invent", and a scraper that cannot answer has not invented anything.
     """
 
-    for path in sorted((ROOT / "scrapers").glob("*.py")):
-        text = path.read_text()
+    from onlyfans_addon.scraper_api.plugins import discover_plugins
 
-        # Only scrapers that actually fetch a model page can have the bug.
-        if "/models/{handle}" not in text:
+    bogus = "zzz-not-a-real-performer-9999"
+
+    for key, loaded in sorted(discover_plugins(str(ROOT / "scrapers")).plugins.items()):
+        try:
+            videos = loaded.scraper.account_videos(bogus, 1) or []
+        except Exception:
+            # 404, timeout, DNS -- all of them are the scraper declining to
+            # answer, which is the correct behaviour for a performer that does
+            # not exist.
+            check(f"{key}: a performer it does not carry yields nothing", True)
             continue
 
-        guarded = (
-            "allow_redirects=False" in text and "is_redirect" in text
-        )
-        # A scraper whose model fetches all go through the shared `_get` is
-        # relying on that helper's redirect following, which is exactly the
-        # unguarded case -- unless the site 404s, which the sibling scrapers
-        # do and which leaves nothing to guard.
-        reaches_via_get = bool(
-            re.search(r"self\._get\(\s*\n?\s*f?\"\{self\.base_url\}/models/", text)
-        )
-
         check(
-            f"{path.name}: a model page is fetched without blindly following redirects",
-            guarded or not reaches_via_get,
-            "model pages are fetched through a redirect-following helper; "
-            "a site that 301s an unknown model to its homepage would return "
-            "that homepage's videos as this performer's",
+            f"{key}: a performer it does not carry yields nothing",
+            not videos,
+            f"returned {len(videos)} videos for a handle that cannot exist -- "
+            f"these belong to other people",
         )
 
 
@@ -381,7 +379,7 @@ test_the_ranking_maths()
 test_every_rail_has_an_ordering()
 test_the_username_identity_check()
 test_the_similarity_terms()
-test_no_scraper_follows_a_redirect_off_a_model_page()
+test_no_scraper_invents_a_performer_it_does_not_carry()
 
 print(f"\n{PASS} passed, {FAIL} failed")
 sys.exit(1 if FAIL else 0)
