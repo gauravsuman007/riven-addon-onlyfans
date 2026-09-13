@@ -327,17 +327,6 @@ def test_the_similarity_terms():
     check("a term nobody else has does not divide by zero", _rarity(0, 0) > 0)
 
 
-test_every_scraper_request_goes_through_the_routed_session()
-test_the_vendored_copies_have_not_drifted()
-test_the_ranking_maths()
-test_every_rail_has_an_ordering()
-test_the_username_identity_check()
-test_the_similarity_terms()
-
-print(f"\n{PASS} passed, {FAIL} failed")
-sys.exit(1 if FAIL else 0)
-
-
 def test_no_scraper_follows_a_redirect_off_a_model_page():
     """A missing performer must come back empty, never as someone else's videos.
 
@@ -384,3 +373,15 @@ def test_no_scraper_follows_a_redirect_off_a_model_page():
             "a site that 301s an unknown model to its homepage would return "
             "that homepage's videos as this performer's",
         )
+
+
+test_every_scraper_request_goes_through_the_routed_session()
+test_the_vendored_copies_have_not_drifted()
+test_the_ranking_maths()
+test_every_rail_has_an_ordering()
+test_the_username_identity_check()
+test_the_similarity_terms()
+test_no_scraper_follows_a_redirect_off_a_model_page()
+
+print(f"\n{PASS} passed, {FAIL} failed")
+sys.exit(1 if FAIL else 0)
