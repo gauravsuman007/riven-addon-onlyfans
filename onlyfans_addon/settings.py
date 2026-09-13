@@ -48,6 +48,8 @@ class OnlyFansModel(BaseModel):
             "porntn",
             "porn4fans",
             "hornyfap",
+            "fapello",
+            "viralxxxporn",
         ],
         description=(
             "Scraper keys to index accounts from. A key that is not installed "
