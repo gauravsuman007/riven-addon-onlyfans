@@ -73,6 +73,13 @@ export const accountVideos = (handle, site, page) =>
     get(`/accounts/${encodeURIComponent(handle)}/videos`, { site, page });
 export const accountGalleries = (handle, site, page) =>
     get(`/accounts/${encodeURIComponent(handle)}/galleries`, { site, page });
+/*
+    Loose images -- the post-per-item archives' feed, which has no albums.
+    Distinct from galleries on purpose; a site answers one or the other, and
+    the mixed grid asks both.
+*/
+export const accountImages = (handle, site, page) =>
+    get(`/accounts/${encodeURIComponent(handle)}/images`, { site, page });
 export const galleryImages = (site, galleryId) =>
     get(`/galleries/${encodeURIComponent(site)}/${encodeURIComponent(galleryId)}`);
 
@@ -89,6 +96,10 @@ export const saveAccount = (handle, saved) =>
 */
 export const imageUrl = (site, galleryId, index) =>
     `${base}/image?site=${encodeURIComponent(site)}&gallery_id=${encodeURIComponent(galleryId)}&index=${index}`;
+
+export const photoUrl = (site, handle, page, index, thumb = false) =>
+    `${base}/photo?site=${encodeURIComponent(site)}&handle=${encodeURIComponent(handle)}` +
+    `&page=${page}&index=${index}${thumb ? "&thumb=true" : ""}`;
 
 export const streamUrl = (site, videoId, index = 0) =>
     `${base}/stream?site=${encodeURIComponent(site)}&video_id=${encodeURIComponent(videoId)}&index=${index}`;

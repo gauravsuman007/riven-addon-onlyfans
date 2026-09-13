@@ -412,6 +412,48 @@
     border-bottom-color: var(--ofx-accent);
 }
 
+/*
+    These are checkboxes now, not tabs, and the box is what says so.
+
+    An underline means "you are here" -- one of a set, exactly one lit. Both
+    of these are lit at once and either can be turned off, which an underline
+    cannot express: two underlined tabs read as a rendering fault. The box is
+    the smallest control that says "independent, and both are on".
+*/
+.ofx-check {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 0.875rem;
+    height: 0.875rem;
+    margin-right: 0.4rem;
+    border: 1.5px solid currentColor;
+    border-radius: 0.1875rem;
+    vertical-align: -2px;
+    opacity: 0.65;
+}
+
+.ofx-tab.ofx-on .ofx-check {
+    background: var(--ofx-accent);
+    border-color: var(--ofx-accent);
+    color: #000;
+    opacity: 1;
+}
+
+.ofx-check svg {
+    width: 0.625rem;
+    height: 0.625rem;
+}
+
+/* A full-size image opened from the mosaic. */
+.ofx-lightbox-image {
+    max-width: 100%;
+    max-height: 100vh;
+    object-fit: contain;
+    display: block;
+    margin: auto;
+}
+
 /* --- controls ---------------------------------------------------------- */
 
 .ofx-controls {
@@ -516,10 +558,24 @@
 
 /* --- media tiles ------------------------------------------------------- */
 
+/*
+    SQUARE AND TIGHT, because that is the grid this page is imitating.
+
+    OnlyFans lays a profile's media out as a dense square mosaic with a 2px
+    gutter and no captions -- three across on a phone, more as the window
+    grows. The 16:9 cards with two-line titles this used to draw are a video
+    site's layout, and the difference is what made the page read as a tube
+    site that happens to list performers rather than as the profile it is
+    standing in for.
+
+    A square also stops the two kinds fighting: a 16:9 box crops a portrait
+    photograph to a letterboxed sliver, and most of what these archives carry
+    is portrait.
+*/
 .ofx-tiles {
     display: grid;
-    gap: 0.75rem;
-    grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+    gap: 2px;
+    grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
 }
 
 /*
@@ -547,11 +603,40 @@
 
 .ofx-thumb {
     position: relative;
-    aspect-ratio: 16 / 9;
-    border-radius: 0.5rem;
+    aspect-ratio: 1 / 1;
     overflow: hidden;
-    border: 1px solid var(--ofx-line);
     background: #18181b;
+}
+
+/*
+    The play marker, so the two kinds are distinguishable at a glance in a
+    grid that no longer carries titles. Centred and translucent rather than a
+    corner badge: the badge slot is taken by the duration, and a mosaic tile
+    is small enough that a corner glyph reads as an artefact.
+*/
+.ofx-play {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    pointer-events: none;
+    color: #fff;
+    filter: drop-shadow(0 1px 3px rgba(0, 0, 0, 0.6));
+}
+
+.ofx-play svg {
+    width: 2.25rem;
+    height: 2.25rem;
+    opacity: 0.85;
+}
+
+.ofx-tile:hover .ofx-thumb img {
+    transform: scale(1.04);
+}
+
+.ofx-thumb img {
+    transition: transform 0.18s ease;
 }
 
 .ofx-thumb img {

@@ -1,10 +1,10 @@
 <script>
     import { untrack } from "svelte";
 
-    import { accountVideos, accountGalleries } from "./api.js";
+    import { accountVideos, accountGalleries, accountImages, photoUrl } from "./api.js";
     import Poster from "./Poster.svelte";
 
-    let { handle, site, mode, onplay, ongallery } = $props();
+    let { handle, site, kinds, onplay, ongallery, onphoto } = $props();
 
     let items = $state([]);
     let page = $state(0);
@@ -13,37 +13,85 @@
     let failed = $state(false);
 
     /*
-        Mounting is what starts the request, and the parent only mounts a
-        section once its site button is pressed. So an unopened site costs
-        nothing, and five sites never fetch at once unless asked to.
+        ONE PAGE IS ALL THREE FEEDS, INTERLEAVED.
+
+        The page used to be a Videos/Images switch, which asked one endpoint
+        and rebuilt the list when it flipped. An OnlyFans profile is not two
+        lists -- it is one reverse-chronological feed with both kinds in it --
+        so the fetch now takes a page from each feed the site offers and the
+        filter decides what is *drawn*, not what is fetched.
+
+        That split matters for paging: filtering at fetch time means "load
+        more" advances different feeds by different amounts depending on which
+        chips happen to be lit, and turning a chip back on leaves a hole in the
+        middle of the list. Fetching everything and hiding some of it keeps one
+        page number honest for all three.
     */
     async function more() {
         if (loading || done) return;
 
         loading = true;
         const next = page + 1;
-        const fetcher = mode === "images" ? accountGalleries : accountVideos;
-        const result = await fetcher(handle, site, next);
 
-        if (result === null) {
-            // This site's failure, shown against this site. The other
-            // sections stay up: an archive being down is routine and must not
-            // read as the whole page being broken.
+        const [videos, galleries, photos] = await Promise.all([
+            accountVideos(handle, site, next),
+            accountGalleries(handle, site, next),
+            accountImages(handle, site, next)
+        ]);
+
+        // Only a total failure is this site's failure. A site that files
+        // images into albums answers nothing for `images` and a site with no
+        // albums answers nothing for `galleries`; neither is an error, and
+        // treating an empty list as one would black out half the archives.
+        if (videos === null && galleries === null && photos === null) {
             failed = true;
         } else {
-            items = [...items, ...result];
+            const batch = [
+                ...(videos ?? []).map((video) => ({
+                    kind: "video",
+                    key: `v:${video.video_id}`,
+                    title: video.title,
+                    thumbnail: video.thumbnail,
+                    badge: duration(video.duration),
+                    item: video
+                })),
+                ...(galleries ?? []).map((gallery) => ({
+                    kind: "image",
+                    key: `g:${gallery.gallery_id}`,
+                    title: gallery.title,
+                    thumbnail: gallery.cover,
+                    badge: gallery.image_count ? `${gallery.image_count}` : null,
+                    item: gallery
+                })),
+                ...(photos ?? []).map((photo) => ({
+                    kind: "image",
+                    key: `p:${photo.image_id ?? `${next}:${photo.index}`}`,
+                    title: "",
+                    // Through the proxy and at grid size: the originals are
+                    // several megabytes each and a page holds 32 of them.
+                    thumbnail: photoUrl(site, handle, next, photo.index, true),
+                    full: photoUrl(site, handle, next, photo.index),
+                    badge: null,
+                    item: photo
+                }))
+            ];
+
+            items = [...items, ...batch];
             page = next;
-            if (result.length === 0) done = true;
+            if (batch.length === 0) done = true;
         }
 
         loading = false;
     }
 
+    const shown = $derived(items.filter((entry) => kinds.has(entry.kind)));
+
     $effect(() => {
-        // The dependencies, read deliberately and in full: the Videos/Images
-        // toggle is a different list entirely rather than more of this one,
-        // and the section is reused across handles and sites.
-        mode;
+        /*
+            The dependencies, read deliberately and in full. `kinds` is NOT
+            among them: the filter hides what is already loaded and must not
+            throw the feed away and refetch it -- see `more()`.
+        */
         handle;
         site;
 
@@ -72,6 +120,12 @@
         });
     });
 
+    function open(entry) {
+        if (entry.kind === "video") onplay(entry.item);
+        else if (entry.full) onphoto(entry);
+        else ongallery(entry.item);
+    }
+
     function duration(seconds) {
         if (!seconds) return null;
         const minutes = Math.floor(seconds / 60);
@@ -86,26 +140,36 @@
         <p class="ofx-error">{site} did not answer.</p>
     {:else if !loading && items.length === 0}
         <p class="ofx-note">Nothing here on {site}.</p>
+    {:else if !loading && shown.length === 0}
+        <!--
+            The difference matters: "this site has nothing" and "you have
+            hidden everything this site has" look identical as an empty grid,
+            and only one of them is something the reader can undo.
+        -->
+        <p class="ofx-note">
+            {site} has no {[...kinds].join(" or ")} for this performer.
+        </p>
     {/if}
 
     <div class="ofx-tiles">
-        {#each items as item (item.video_id ?? item.gallery_id)}
-            <button
-                class="ofx-tile"
-                type="button"
-                onclick={() => (mode === "images" ? ongallery(item) : onplay(item))}>
+        {#each shown as entry (entry.key)}
+            <button class="ofx-tile" type="button" onclick={() => open(entry)}>
                 <div class="ofx-thumb">
-                    <Poster
-                        src={mode === "images" ? item.cover : item.thumbnail}
-                        alt={item.title}
-                        name={item.title} />
-                    {#if mode === "images" && item.image_count}
-                        <span class="ofx-badge">{item.image_count}</span>
-                    {:else if duration(item.duration)}
-                        <span class="ofx-badge">{duration(item.duration)}</span>
+                    <Poster src={entry.thumbnail} alt={entry.title} name={entry.title} />
+                    {#if entry.badge}
+                        <span class="ofx-badge">{entry.badge}</span>
+                    {/if}
+                    {#if entry.kind === "video"}
+                        <span class="ofx-play" aria-hidden="true">
+                            <svg viewBox="0 0 24 24" fill="currentColor">
+                                <path d="M8 5v14l11-7z" />
+                            </svg>
+                        </span>
                     {/if}
                 </div>
-                <p>{item.title}</p>
+                {#if entry.title}
+                    <p>{entry.title}</p>
+                {/if}
             </button>
         {/each}
 

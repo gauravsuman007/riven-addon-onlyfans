@@ -14,7 +14,17 @@
 
     let account = $state(null);
     let failed = $state(false);
-    let mode = $state("videos");
+    /*
+        BOTH LIT BY DEFAULT, because the page is meant to read as the
+        performer's feed and that is what a feed contains. A Set rather than a
+        pair of booleans so the sections can ask `kinds.has(...)` without
+        knowing how many kinds exist.
+
+        Unselecting both is allowed and says so rather than silently snapping
+        back -- a control that refuses to reach a state it offers is worse
+        than one that lets you get there and tells you where you are.
+    */
+    let kinds = $state(new Set(["video", "image"]));
     let opened = $state(new Set());
     /*
         Collapsed until asked, because an OnlyFans bio is 20-40 lines of
@@ -36,6 +46,7 @@
     */
     let playing = $state(null);
     let lightbox = $state(null);
+    let photo = $state(null);
     let lightboxError = $state(null);
 
     $effect(() => {
@@ -61,6 +72,12 @@
             ["likes", account?.likes_count]
         ].filter(([, value]) => value != null)
     );
+
+    function toggleKind(kind) {
+        const next = new Set(kinds);
+        next.has(kind) ? next.delete(kind) : next.add(kind);
+        kinds = next;
+    }
 
     function toggleSite(site) {
         const next = new Set(opened);
@@ -97,6 +114,16 @@
         });
     }
 
+    /*
+        A loose image opens straight to its full-size file. Unlike a gallery
+        there is nothing to resolve first -- the feed already addressed it --
+        so this is a one-line lightbox rather than a fetch.
+    */
+    function openPhoto(entry) {
+        lightboxError = null;
+        photo = entry;
+    }
+
     async function openGallery(gallery) {
         lightboxError = null;
         const images = await galleryImages(gallery.site, gallery.gallery_id);
@@ -128,6 +155,7 @@
         if (event.key === "Escape") {
             playing = null;
             lightbox = null;
+            photo = null;
             return;
         }
 
@@ -234,14 +262,22 @@
             </div>
         </div>
 
-        <div class="ofx-tabs">
-            {#each ["videos", "images"] as option (option)}
+        <div class="ofx-tabs" role="group" aria-label="Show">
+            {#each [["video", "Videos"], ["image", "Photos"]] as [kind, label] (kind)}
                 <button
                     class="ofx-tab"
-                    class:ofx-on={mode === option}
+                    class:ofx-on={kinds.has(kind)}
                     type="button"
-                    onclick={() => (mode = option)}>
-                    {option}
+                    aria-pressed={kinds.has(kind)}
+                    onclick={() => toggleKind(kind)}>
+                    <span class="ofx-check" aria-hidden="true">
+                        {#if kinds.has(kind)}
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3">
+                                <path d="m5 12 5 5L20 7" />
+                            </svg>
+                        {/if}
+                    </span>
+                    {label}
                 </button>
             {/each}
         </div>
@@ -279,9 +315,10 @@
         <SiteSection
             handle={account.handle}
             site={source.site}
-            {mode}
+            {kinds}
             onplay={(video) => play(video)}
-            ongallery={openGallery} />
+            ongallery={openGallery}
+            onphoto={openPhoto} />
     {/each}
 
     <!--
@@ -302,6 +339,15 @@
     {/key}
 {:else}
     <p class="ofx-note">Loading…</p>
+{/if}
+
+{#if photo}
+    <div class="ofx-overlay">
+        <button class="ofx-close" type="button" onclick={() => (photo = null)} aria-label="Close">
+            ✕
+        </button>
+        <img class="ofx-lightbox-image" src={photo.full} alt="" />
+    </div>
 {/if}
 
 <!--

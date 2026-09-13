@@ -74,6 +74,23 @@ globalThis.fetch = async (url) => {
                           page_url: "http://x/1"
                       }
                   ]
+                // These two must be matched BEFORE the bare `/accounts/`
+                // branch below, which would otherwise swallow them and hand
+                // the mixed grid an account object where it expects a list.
+                // That is exactly what it did: `.map is not a function`, from
+                // inside the bundle, with nothing naming the endpoint.
+                : String(url).includes("/galleries")
+                ? [
+                      {
+                          site: "hornyfap",
+                          gallery_id: "g1",
+                          title: "An Album",
+                          cover: "http://x/c.jpg",
+                          image_count: 8
+                      }
+                  ]
+                : String(url).includes("/images")
+                ? [{ index: 0, image_id: "demo/12", width: null, height: null }]
                 : String(url).includes("/accounts/")
                 ? {
                       handle: "demo",
@@ -237,6 +254,53 @@ const videoCalls = calls.slice(before).filter((c) => c.includes("/videos"));
 
 console.log("site opens and renders its videos:", opened.includes("A Clip"));
 console.log("fetches that site exactly once:", videoCalls.length === 1, `(${videoCalls.length})`);
+
+/*
+    THE MIXED GRID AND ITS FILTER.
+
+    One page of a site is all three feeds at once -- videos, albums and loose
+    images -- because an OnlyFans profile is one feed with both kinds in it
+    rather than two lists behind a switch.
+
+    The filter then hides what is drawn WITHOUT refetching. That is the part
+    worth asserting: filtering at fetch time makes "load more" advance each
+    feed by a different amount depending on which chips are lit, and turning a
+    chip back on leaves a hole in the middle of the list.
+*/
+const opened2 = target.innerHTML;
+console.log(
+    "one page asks every feed the site has:",
+    calls.some((c) => c.includes("/videos")) &&
+        calls.some((c) => c.includes("/galleries")) &&
+        calls.some((c) => c.includes("/images"))
+);
+console.log("the grid mixes both kinds:", opened2.includes("An Album") && opened2.includes("A Clip"));
+
+const chip = (label) =>
+    [...target.querySelectorAll("button")].find(
+        (b) => (b.textContent || "").trim() === label
+    );
+
+console.log("both filter chips start selected:", 
+    chip("Videos")?.getAttribute("aria-pressed") === "true" &&
+    chip("Photos")?.getAttribute("aria-pressed") === "true");
+
+const beforeFilter = calls.length;
+chip("Photos")?.dispatchEvent(new dom.window.Event("click", { bubbles: true }));
+await new Promise((r) => setTimeout(r, 150));
+const filtered = target.innerHTML;
+
+console.log("unselecting photos hides them:", !filtered.includes("An Album"));
+console.log("...and leaves the videos:", filtered.includes("A Clip"));
+console.log(
+    "...without refetching anything:",
+    calls.length === beforeFilter,
+    `(${calls.length - beforeFilter} new)`
+);
+
+chip("Photos")?.dispatchEvent(new dom.window.Event("click", { bubbles: true }));
+await new Promise((r) => setTimeout(r, 150));
+console.log("reselecting brings them straight back:", target.innerHTML.includes("An Album"));
 
 // Playing one: through the host, with everything the host's player needs to
 // hand it to another application (site + videoId identify it; the host adds

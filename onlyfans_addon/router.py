@@ -162,6 +162,23 @@ class GalleryResponse(BaseModel):
     posted: str | None
 
 
+class PhotoResponse(BaseModel):
+    """One loose image in an account's feed, addressed by position.
+
+    Same reasoning as :class:`GalleryImageResponse` -- a position, not a URL.
+    The extra `index` context here is (site, handle, page), because these
+    images do not belong to a gallery that could identify them.
+
+    `image_id` is passed through only so the browser has a stable key for the
+    grid; it is never what fetches the bytes.
+    """
+
+    index: int
+    image_id: str | None = None
+    width: int | None = None
+    height: int | None = None
+
+
 class GalleryImageResponse(BaseModel):
     """One image, addressed by position rather than by URL.
 
@@ -593,6 +610,40 @@ def account_galleries(
     ]
 
 
+#: Resolved image feeds, keyed on (site, site_handle, page). A grid of 32
+#: photographs is 32 `/photo` calls, and without this each one would re-fetch
+#: and re-parse the same feed page. Same short TTL and same reason as the
+#: gallery cache below: some of these URLs carry tokens that expire.
+_FEED_TTL = 120.0
+_feed_cache: dict[tuple[str, str, int], tuple[float, list]] = {}
+
+
+def _account_images(site: str, site_handle: str, page: int) -> list:
+    key = (site, site_handle, page)
+    cached = _feed_cache.get(key)
+
+    if cached and (time.monotonic() - cached[0]) < _FEED_TTL:
+        return cached[1]
+
+    scraper = of_registry().services.get(site)
+
+    if scraper is None:
+        raise HTTPException(
+            status_code=404, detail=f"No scraper named {site} is installed"
+        )
+
+    try:
+        images = scraper.account_images(site_handle, page)
+    except Exception as exc:
+        logger.warning(f"OnlyFans: {site} images failed for {site_handle}: {exc}")
+        raise HTTPException(
+            status_code=502, detail=f"{site} could not be read"
+        ) from exc
+
+    _feed_cache[key] = (time.monotonic(), images)
+    return images
+
+
 #: Resolved galleries, keyed on (site, gallery_id). A lightbox opens N images
 #: from one gallery and each `/image` call would otherwise re-fetch and
 #: re-parse the album page. Short-lived because the image URLs carry tokens
@@ -624,6 +675,62 @@ def _gallery_images(site: str, gallery_id: str) -> list:
 
     _gallery_cache[(site, gallery_id)] = (time.monotonic(), images)
     return images
+
+
+@router.get("/accounts/{handle}/images", operation_id="get_onlyfans_account_images")
+def account_images(
+    handle: str,
+    site: Annotated[str, Query()],
+    page: Annotated[int, Query(ge=1)] = 1,
+) -> list[PhotoResponse]:
+    """One page of an account's loose images on one site, newest first.
+
+    Distinct from `/galleries`, which lists albums. A site that files its
+    images into albums answers nothing here and everything there; the
+    post-per-item archives are the other way round. The mixed grid asks both
+    and interleaves what comes back.
+    """
+
+    scraper, site_handle = _scraper_for(handle, site)
+    images = _account_images(site, site_handle, page)
+
+    return [
+        PhotoResponse(
+            index=index,
+            image_id=image.image_id,
+            width=image.width,
+            height=image.height,
+        )
+        for index, image in enumerate(images)
+    ]
+
+
+@router.get("/photo", operation_id="get_onlyfans_photo")
+async def photo(
+    site: Annotated[str, Query()],
+    handle: Annotated[str, Query()],
+    index: Annotated[int, Query(ge=0)],
+    page: Annotated[int, Query(ge=1)] = 1,
+    thumb: Annotated[bool, Query()] = False,
+) -> StreamingResponse:
+    """Proxy one loose image out of an account's feed.
+
+    `thumb` picks the grid crop where the site publishes one. A feed page is
+    32 images and the originals run to several megabytes each, so a grid that
+    asked for full-size files would move a hundred megabytes to draw one
+    screen.
+    """
+
+    _, site_handle = _scraper_for(handle, site)
+    images = _account_images(site, site_handle, page)
+
+    if index >= len(images):
+        raise HTTPException(status_code=404, detail="No such image")
+
+    source = images[index]
+    url = (source.thumbnail if thumb else None) or source.url
+
+    return await _proxy_image(url, source.headers, f"{site}:{handle}")
 
 
 @router.get("/galleries/{site}/{gallery_id}", operation_id="get_onlyfans_gallery")
@@ -663,6 +770,21 @@ async def image(
 
     source = images[index]
 
+    return await _proxy_image(source.url, source.headers, f"{site}:{gallery_id}")
+
+
+async def _proxy_image(
+    url: str, headers: dict[str, str], label: str
+) -> StreamingResponse:
+    """Stream one upstream image back to the browser.
+
+    Shared by `/image` and `/photo` because the two differ only in how they
+    find the URL. The transport rules -- routing policy, the browser headers
+    these hosts require, what to do with an upstream error -- are the same, and
+    a second copy of them would be a second place for the VPN fail-closed rule
+    to be got wrong.
+    """
+
     try:
         proxy = vpn().proxy_for(STREAMING)
     except VpnUnavailable as exc:
@@ -677,55 +799,43 @@ async def image(
     try:
         upstream = await client.send(
             client.build_request(
-                "GET", source.url, headers={**BROWSER_HEADERS, **source.headers}
+                "GET", url, headers={**BROWSER_HEADERS, **headers}
             ),
             stream=True,
         )
     except Exception as exc:
         await client.aclose()
-        logger.error(f"OnlyFans image upstream failed for {site}:{gallery_id}: {exc}")
+        logger.error(f"OnlyFans image upstream failed for {label}: {exc}")
         raise HTTPException(status_code=502, detail="Upstream connection failed")
 
     if upstream.status_code >= 400:
         status_code = upstream.status_code
         await upstream.aclose()
         await client.aclose()
-
-        """
-        A rejected RANGE is passed through as itself, not rebranded a 502.
-
-        416 means the offset is past the end of this file, and a player told
-        so re-requests from a valid one. A player told 502 treats it as
-        transient and retries the SAME request -- forever, which is what
-        endless buffering in an external player actually is.
-        """
-        if status_code == 416:
-            raise HTTPException(
-                status_code=416, detail="That part of the video is past its end"
-            )
-
         raise HTTPException(status_code=502, detail=f"Upstream returned {status_code}")
 
-    headers = {
+    response_headers = {
         key: upstream.headers[key]
         for key in ("content-type", "content-length")
         if key in upstream.headers
     }
     # These are immutable once published and the token in the URL is what
     # expires, not the bytes, so the browser may keep them for the session.
-    headers["cache-control"] = "private, max-age=3600"
+    response_headers["cache-control"] = "private, max-age=3600"
 
     async def body():
         try:
             async for chunk in upstream.aiter_bytes():
                 yield chunk
         except Exception as exc:
-            logger.debug(f"OnlyFans image interrupted for {site}:{gallery_id}: {exc}")
+            logger.debug(f"OnlyFans image interrupted for {label}: {exc}")
         finally:
             await upstream.aclose()
             await client.aclose()
 
-    return StreamingResponse(body(), status_code=upstream.status_code, headers=headers)
+    return StreamingResponse(
+        body(), status_code=upstream.status_code, headers=response_headers
+    )
 
 
 class SyncRunResponse(BaseModel):
