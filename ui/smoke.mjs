@@ -276,21 +276,21 @@ console.log(
 );
 console.log("the grid mixes both kinds:", opened2.includes("An Album") && opened2.includes("A Clip"));
 
-const chip = (label) =>
-    [...target.querySelectorAll("button")].find(
+const tab = (label) =>
+    [...target.querySelectorAll('[role="tab"]')].find(
         (b) => (b.textContent || "").trim() === label
     );
 
-console.log("both filter chips start selected:", 
-    chip("Videos")?.getAttribute("aria-pressed") === "true" &&
-    chip("Photos")?.getAttribute("aria-pressed") === "true");
+console.log("three tabs, All selected:",
+    ["All", "Videos", "Photos"].every((label) => tab(label)) &&
+    tab("All")?.getAttribute("aria-selected") === "true");
 
 const beforeFilter = calls.length;
-chip("Photos")?.dispatchEvent(new dom.window.Event("click", { bubbles: true }));
+tab("Videos")?.dispatchEvent(new dom.window.Event("click", { bubbles: true }));
 await new Promise((r) => setTimeout(r, 150));
 const filtered = target.innerHTML;
 
-console.log("unselecting photos hides them:", !filtered.includes("An Album"));
+console.log("the Videos tab hides the photos:", !filtered.includes("An Album"));
 console.log("...and leaves the videos:", filtered.includes("A Clip"));
 console.log(
     "...without refetching anything:",
@@ -298,16 +298,27 @@ console.log(
     `(${calls.length - beforeFilter} new)`
 );
 
-chip("Photos")?.dispatchEvent(new dom.window.Event("click", { bubbles: true }));
+tab("Photos")?.dispatchEvent(new dom.window.Event("click", { bubbles: true }));
 await new Promise((r) => setTimeout(r, 150));
-console.log("reselecting brings them straight back:", target.innerHTML.includes("An Album"));
+const photosOnly = target.innerHTML;
+console.log("the Photos tab is the other half:",
+    photosOnly.includes("An Album") && !photosOnly.includes("A Clip"));
+
+tab("All")?.dispatchEvent(new dom.window.Event("click", { bubbles: true }));
+await new Promise((r) => setTimeout(r, 150));
+console.log("All brings both straight back:",
+    target.innerHTML.includes("An Album") && target.innerHTML.includes("A Clip"));
 
 // Playing one: through the host, with everything the host's player needs to
 // hand it to another application (site + videoId identify it; the host adds
 // which add-on it came from).
-const card = [...target.querySelectorAll("button")].find((b) =>
-    (b.textContent || "").includes("A Clip")
+// The picture is the button and the caption beside it is not -- selecting
+// caption text must not open the post -- so the click goes to the tile's own
+// `.ofx-open`, found via the article that carries the title.
+const tile = [...target.querySelectorAll(".ofx-tile")].find((node) =>
+    (node.textContent || "").includes("A Clip")
 );
+const card = tile?.querySelector(".ofx-open");
 card?.click();
 await new Promise((r) => setTimeout(r, 50));
 

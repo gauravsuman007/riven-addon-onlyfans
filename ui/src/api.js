@@ -80,6 +80,17 @@ export const accountGalleries = (handle, site, page) =>
 */
 export const accountImages = (handle, site, page) =>
     get(`/accounts/${encodeURIComponent(handle)}/images`, { site, page });
+/*
+    The text under one post, fetched a card at a time.
+
+    Separate from `accountVideos` because it is a request per video on the
+    site's side: the grid page carries no captions, only the video's own page
+    does. The list endpoint says which sites have any (`has_text`), so this is
+    only ever called where there is something to get.
+*/
+export const videoInfo = (site, videoId) =>
+    get("/videoinfo", { site, video_id: videoId });
+
 export const galleryImages = (site, galleryId) =>
     get(`/galleries/${encodeURIComponent(site)}/${encodeURIComponent(galleryId)}`);
 

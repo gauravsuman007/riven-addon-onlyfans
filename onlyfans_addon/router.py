@@ -150,6 +150,14 @@ class VideoResponse(BaseModel):
     resolution: str | None
     views: int | None
     hd: bool
+    posted_at: str | None = None
+    """Verbatim, as the site worded it -- "6 days ago". Not a timestamp: see
+    `DirectVideo.posted_at`."""
+    description: str | None = None
+    has_text: bool = False
+    """This site keeps a paragraph on the video's own page, which `/videoinfo`
+    will fetch. The flag exists so a grid does not make a request per card to
+    discover that six of the seven archives have nothing to say."""
 
 
 class GalleryResponse(BaseModel):
@@ -427,21 +435,35 @@ def get_account(handle: str) -> AccountDetailResponse:
     each one names the scraper key to ask and the slug to ask it for.
     """
 
+    _backfill_counts(handle)
+
     with db_session() as session:
         account = _lookup(session, handle)
 
         return AccountDetailResponse(
             **_account_response(account).model_dump(),
-            sources=[
-                AccountSourceResponse(
-                    site=source.site,
-                    site_handle=source.site_handle,
-                    page_url=source.page_url,
-                    video_count=source.video_count,
-                    image_count=source.image_count,
-                )
-                for source in account.sources
-            ],
+            # Ordered by how much the site actually holds, deepest first, so
+            # the button most worth pressing is the first one. A site whose
+            # tally is unknown sorts last rather than as a zero: "we did not
+            # find out" is not "there is nothing here", and sinking it below a
+            # site that honestly reports 0 would be a claim we cannot make.
+            sources=sorted(
+                (
+                    AccountSourceResponse(
+                        site=source.site,
+                        site_handle=source.site_handle,
+                        page_url=source.page_url,
+                        video_count=source.video_count,
+                        image_count=source.image_count,
+                    )
+                    for source in account.sources
+                ),
+                key=lambda source: (
+                    source.video_count is None and source.image_count is None,
+                    -((source.video_count or 0) + (source.image_count or 0)),
+                    source.site,
+                ),
+            ),
             of_username=account.of_username,
             # Built rather than stored: the stored username IS the link, and a
             # second column holding the same fact could disagree with it.
@@ -459,6 +481,81 @@ def get_account(handle: str) -> AccountDetailResponse:
             likes_count=account.likes_count,
             subscribe_price=account.subscribe_price,
         )
+
+
+#: Handles whose counts have already been asked for in this process, so a
+#: performer whose sites genuinely state no tally is not re-asked on every
+#: page view. Cleared only by a restart, which is the right lifetime: a new
+#: figure arrives with the next index walk, not within a session.
+_counted: set[str] = set()
+
+
+def _backfill_counts(handle: str) -> None:
+    """Ask each site for the tallies the index walk did not record.
+
+    WHY THIS IS NOT LEFT TO THE WALK. Two of the seven archives publish no
+    figure on their model index -- porn4fans and viralxxxporn state it only on
+    the performer's own page -- and fapello publishes it on neither its index
+    nor anywhere a card can reach. Those three showed no number under their
+    button while the other four did, which reads as "this site has nothing"
+    rather than "nobody asked".
+
+    Backfilling here rather than in the sync keeps it proportional: one extra
+    request per site, once, for a performer somebody actually opened, instead
+    of thirteen thousand accounts' worth of profile fetches for pages nobody
+    will look at. The result is persisted, so the cost is paid once and the
+    ordering it feeds is stable on every later visit.
+
+    Every failure is silent. A site that is down must cost this page nothing
+    but the figure it would have contributed.
+    """
+
+    if handle in _counted:
+        return
+
+    with db_session() as session:
+        account = _lookup(session, handle)
+        pending = [
+            (source.site, source.site_handle)
+            for source in account.sources
+            if source.video_count is None and source.image_count is None
+        ]
+
+    _counted.add(handle)
+    services = of_registry().services
+
+    for site, site_handle in pending:
+        scraper = services.get(site)
+
+        if scraper is None:
+            continue
+
+        try:
+            profile = scraper.account_profile(site_handle)
+        except Exception as exc:
+            logger.debug(f"OnlyFans: {site} profile failed for {handle}: {exc}")
+            continue
+
+        if profile is None or (
+            profile.video_count is None and profile.image_count is None
+        ):
+            continue
+
+        try:
+            with db_session() as session:
+                stored = _lookup(session, handle)
+                source = next(
+                    (item for item in stored.sources if item.site == site), None
+                )
+
+                if source is None:
+                    continue
+
+                source.video_count = profile.video_count
+                source.image_count = profile.image_count
+                session.commit()
+        except Exception as exc:
+            logger.debug(f"OnlyFans: could not store {site} counts: {exc}")
 
 
 @router.post("/accounts/{handle}/save", operation_id="save_onlyfans_account")
@@ -566,9 +663,71 @@ def account_videos(
             resolution=video.resolution,
             views=video.views,
             hd=video.hd,
+            posted_at=video.posted_at,
+            description=video.description,
+            has_text=scraper.has_post_text,
         )
         for video in videos
     ]
+
+
+@router.get("/videoinfo", operation_id="get_onlyfans_video_info")
+def video_info(
+    site: Annotated[str, Query()],
+    video_id: Annotated[str, Query()],
+) -> VideoResponse | None:
+    """The text a grid card does not carry, for one video.
+
+    ONE REQUEST PER VIDEO, which is why the caller is expected to ask only for
+    what is on screen and only where `has_text` said there would be something.
+    Cached for the same two minutes as the feeds, so scrolling a post back into
+    view does not re-ask the site.
+
+    A site with nothing to say answers None without touching the network, and
+    a site that fails answers None as well: a missing caption must not take
+    down the tile it belongs to.
+    """
+
+    scraper = of_registry().services.get(site)
+
+    if scraper is None or not scraper.has_post_text:
+        return None
+
+    key = (site, video_id)
+    cached = _text_cache.get(key)
+
+    if cached and time.monotonic() - cached[0] < _FEED_TTL:
+        return cached[1]
+
+    try:
+        found = scraper.video_info(video_id)
+    except Exception as exc:
+        logger.debug(f"OnlyFans: {site} had no text for {video_id}: {exc}")
+        found = None
+
+    answer = (
+        VideoResponse(
+            site=site,
+            video_id=video_id,
+            title=found.title,
+            page_url=found.page_url,
+            thumbnail=found.thumbnail,
+            duration=found.duration,
+            resolution=found.resolution,
+            views=found.views,
+            hd=found.hd,
+            posted_at=found.posted_at,
+            description=found.description,
+            has_text=True,
+        )
+        if found
+        else None
+    )
+    _text_cache[key] = (time.monotonic(), answer)
+    return answer
+
+
+_text_cache: dict[tuple[str, str], tuple[float, "VideoResponse | None"]] = {}
 
 
 @router.get(

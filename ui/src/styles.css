@@ -330,10 +330,11 @@
 }
 
 .ofx-more {
-    border: 0;
+    border: 1px solid var(--ofx-line);
     background: none;
-    padding: 0;
-    margin-top: 0.35rem;
+    padding: 0.2rem 0.7rem;
+    margin-top: 0.5rem;
+    border-radius: 9999px;
     color: var(--ofx-accent);
     font: inherit;
     font-size: 0.75rem;
@@ -341,7 +342,7 @@
 }
 
 .ofx-more:hover {
-    text-decoration: underline;
+    border-color: var(--ofx-accent);
 }
 
 .ofx-stats,
@@ -383,66 +384,40 @@
 */
 .ofx-tabs {
     display: flex;
-    gap: 0.25rem;
-    padding: 0 1.25rem;
+    gap: 0.4rem;
+    padding: 0.75rem 1.25rem 1rem;
     border-top: 1px solid var(--ofx-line);
 }
 
+/*
+    PILLS, NOT UNDERLINES, because this is one choice again.
+
+    It was a pair of checkboxes while both kinds could be lit at once, and a
+    box is the only control that says "independent". Three tabs of which
+    exactly one is on is the opposite shape, and a filled pill is what says
+    that -- an underline under "All" reads as a heading, not a selection.
+*/
 .ofx-tab {
-    border: 0;
+    border: 1px solid var(--ofx-line);
     background: none;
     color: var(--ofx-muted);
     font: inherit;
     font-size: 0.8125rem;
-    text-transform: capitalize;
-    padding: 0.75rem 0.5rem;
+    padding: 0.35rem 1rem;
+    border-radius: 9999px;
     cursor: pointer;
-    /* Transparent rather than absent: a border that appears on selection
-       would shift the row by 2px every time the tab changed. */
-    border-bottom: 2px solid transparent;
-    margin-bottom: -1px;
 }
 
 .ofx-tab:hover {
     color: var(--ofx-fg);
+    border-color: var(--ofx-fg);
 }
 
 .ofx-tab.ofx-on {
-    color: var(--ofx-fg);
-    border-bottom-color: var(--ofx-accent);
-}
-
-/*
-    These are checkboxes now, not tabs, and the box is what says so.
-
-    An underline means "you are here" -- one of a set, exactly one lit. Both
-    of these are lit at once and either can be turned off, which an underline
-    cannot express: two underlined tabs read as a rendering fault. The box is
-    the smallest control that says "independent, and both are on".
-*/
-.ofx-check {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    width: 0.875rem;
-    height: 0.875rem;
-    margin-right: 0.4rem;
-    border: 1.5px solid currentColor;
-    border-radius: 0.1875rem;
-    vertical-align: -2px;
-    opacity: 0.65;
-}
-
-.ofx-tab.ofx-on .ofx-check {
     background: var(--ofx-accent);
     border-color: var(--ofx-accent);
     color: #000;
-    opacity: 1;
-}
-
-.ofx-check svg {
-    width: 0.625rem;
-    height: 0.625rem;
+    font-weight: 600;
 }
 
 /* A full-size image opened from the mosaic. */
@@ -464,25 +439,52 @@
     margin-bottom: 1.5rem;
 }
 
+/*
+    EVERY BUTTON IS A BUTTON, and none of them is a word with a click handler.
+
+    These were transparent with no border unless something also gave them
+    `.ofx-outline`, so half the controls on a page -- "All accounts", the
+    site pickers, "load more" -- read as body text that happened to respond.
+    A filled pill with a boundary is the smallest thing that says "press me"
+    without a label explaining that it is pressable.
+*/
 .ofx-btn {
-    border: 1px solid transparent;
-    background: none;
-    color: var(--ofx-muted);
+    border: 1px solid var(--ofx-line);
+    background: rgba(255, 255, 255, 0.06);
+    color: var(--ofx-fg);
     font: inherit;
     font-size: 0.8125rem;
-    padding: 0.3rem 0.9rem;
+    padding: 0.4rem 1rem;
     border-radius: 9999px;
     cursor: pointer;
     text-transform: capitalize;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.1rem;
+    line-height: 1.3;
+    transition: background 0.15s ease, border-color 0.15s ease;
 }
 
 .ofx-btn:hover {
-    color: var(--ofx-fg);
+    background: rgba(255, 255, 255, 0.14);
+    border-color: var(--ofx-fg);
 }
 
+/* An opened site, which is a state and not a hover. */
 .ofx-btn.ofx-on {
-    background: rgba(255, 255, 255, 0.15);
-    color: var(--ofx-fg);
+    background: var(--ofx-accent);
+    border-color: var(--ofx-accent);
+    color: #000;
+    font-weight: 600;
+}
+
+.ofx-btn.ofx-on .ofx-count {
+    opacity: 0.85;
+}
+
+.ofx-btn:disabled {
+    opacity: 0.5;
+    cursor: default;
 }
 
 .ofx-btn.ofx-outline {
@@ -572,25 +574,53 @@
     photograph to a letterboxed sliver, and most of what these archives carry
     is portrait.
 */
-.ofx-tiles {
-    display: grid;
-    gap: 2px;
-    grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+/*
+    A JUSTIFIED MOSAIC, laid out from the pictures' own shapes.
+
+    The grid it replaces was `repeat(auto-fill, minmax(140px, 1fr))` with a
+    square `aspect-ratio` on every thumbnail, which cropped every one of them
+    to a square: a 16:9 still from a KVS player lost a third of its width and
+    a portrait fapello photograph lost its top and bottom. Both kinds sit in
+    the same feed, so neither ratio can be the one the grid is built around.
+
+    Flex does the arithmetic instead. Each tile grows in proportion to its own
+    aspect ratio and takes a basis of that ratio times a nominal row height,
+    so a row of them settles at a common height and between them fills the
+    width -- portrait and landscape side by side, both whole. The ratio is
+    measured from the decoded file (see `Poster`), because nothing in either
+    feed states it.
+*/
+.ofx-mosaic {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    margin-bottom: 1rem;
 }
 
 /*
-    A COLUMN, because a `<button>` centres its content.
-
-    Grid rows stretch every tile to the tallest in the row, and a button's
-    anonymous content box is centred inside it -- so a tile with a one-line
-    title sat 8px lower than its two-line neighbours and the row of
-    thumbnails came out visibly ragged. As a flex column the content packs to
-    the top and the thumbnails line up.
+    The last row has nothing to justify against and would stretch its two or
+    three tiles across the full width, several times taller than every row
+    above. This absorbs the slack instead. Zero height, so it adds no row of
+    its own.
 */
+.ofx-mosaic-tail {
+    flex-grow: 999999;
+    flex-basis: 0;
+    height: 0;
+}
+
 .ofx-tile {
     display: flex;
     flex-direction: column;
-    align-items: stretch;
+    min-width: 0;
+    /* The flex-basis and grow factor are per-tile and come from the markup,
+       because they are computed from that picture's ratio. */
+}
+
+/* The picture itself is the button; the caption below it is not, so that
+   selecting caption text does not open the post. */
+.ofx-open {
+    display: block;
     border: 0;
     padding: 0;
     background: none;
@@ -598,14 +628,17 @@
     font: inherit;
     cursor: pointer;
     text-align: left;
-    min-width: 0;
 }
 
 .ofx-thumb {
     position: relative;
-    aspect-ratio: 1 / 1;
+    /* The file's own ratio, handed down from the tile. The fallback matters:
+       a tile whose image has not decoded yet, or has failed and fallen back
+       to initials, still needs a box of some shape to hold the row open. */
+    aspect-ratio: var(--ofx-ar, 1.6);
     overflow: hidden;
     background: #18181b;
+    border-radius: 6px;
 }
 
 /*
@@ -657,15 +690,78 @@
     font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
 }
 
-.ofx-tile p {
-    margin: 0.4rem 0 0;
+/* --- the post under a picture ------------------------------------------ */
+
+.ofx-caption {
+    padding: 0.4rem 0.2rem 0;
+}
+
+.ofx-caption p {
+    margin: 0;
     font-size: 0.75rem;
-    line-height: 1.35;
+    line-height: 1.4;
     display: -webkit-box;
     -webkit-line-clamp: 2;
     line-clamp: 2;
     -webkit-box-orient: vertical;
     overflow: hidden;
+}
+
+.ofx-caption-title {
+    font-weight: 600;
+}
+
+/*
+    The site's paragraph, and it is allowed more room than the title because
+    it is the part worth reading. Three lines rather than all of it: these run
+    to forty words and a mosaic row is only as tall as its shortest tile
+    allows before the captions start pushing the next row down unevenly.
+*/
+.ofx-caption-text {
+    color: var(--ofx-muted);
+    margin-top: 0.15rem !important;
+    -webkit-line-clamp: 3;
+    line-clamp: 3;
+}
+
+.ofx-caption-when {
+    color: var(--ofx-muted);
+    font-size: 0.6875rem !important;
+    margin-top: 0.25rem !important;
+    opacity: 0.8;
+}
+
+/*
+    ONE COLUMN ON A PHONE, full width, the picture at its own shape.
+
+    A justified mosaic needs a row wide enough to hold two pictures side by
+    side before it is worth anything; at 390px it produces one tile per row
+    anyway, but sized by a basis computed for a desktop row, so a portrait
+    photograph came out as a letterbox strip. Stating the single column
+    outright is both what the phone wants and what the feed it is imitating
+    does.
+*/
+@media (max-width: 640px) {
+    .ofx-mosaic {
+        gap: 1.25rem;
+    }
+
+    .ofx-mosaic > .ofx-tile {
+        /* Overrides the per-tile basis and grow factor in the markup, which
+           are the desktop row's arithmetic and mean nothing here. */
+        flex: 0 0 100% !important;
+    }
+
+    .ofx-thumb {
+        border-radius: 0;
+    }
+
+    .ofx-caption p {
+        font-size: 0.875rem;
+        -webkit-line-clamp: none;
+        line-clamp: none;
+        display: block;
+    }
 }
 
 .ofx-section {
@@ -698,6 +794,9 @@
 
 .ofx-skeleton {
     aspect-ratio: 16 / 9;
+    /* A flex child of the mosaic now, so it needs a shape of its own or it
+       collapses to nothing and the section looks idle while it loads. */
+    min-width: 0;
     border-radius: 0.5rem;
     background: linear-gradient(90deg, #18181b, #27272a, #18181b);
     background-size: 200% 100%;

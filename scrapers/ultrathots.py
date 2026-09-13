@@ -215,7 +215,13 @@ def _profile(
     )
     bio = descriptions[0].text_content().strip() if descriptions else ""
 
-    if not avatar and not bio:
+    videos, photos = _model_tallies(tree)
+
+    # A tally counts as something to add. viralxxxporn renders no avatar in
+    # the class this file looks for, so a profile carrying nothing but its
+    # counts used to be discarded whole -- and that site then showed no
+    # figure under its button anywhere in the UI.
+    if not avatar and not bio and videos is None and photos is None:
         return None
 
     return DirectAccount(
@@ -225,6 +231,8 @@ def _profile(
         page_url=f"{base_url}/models/{handle}/",
         avatar=avatar,
         bio=bio or None,
+        video_count=videos,
+        image_count=photos,
     )
 
 
@@ -533,3 +541,35 @@ def label_of(
 def _rank(source: DirectSource) -> int:
     match = _RESOLUTION_RE.search(source.resolution or source.label or "")
     return int(match.group(1)) if match else 0
+
+
+def _model_tallies(tree) -> tuple[int | None, int | None]:
+    """"45 Videos / 0 Photos" from a model page's statistic strip.
+
+    THE MODEL INDEX IS NOT THE ONLY PLACE THESE LIVE, and on two of the family
+    it is not a place they live at all: the card in `/models/` carries
+    "2 videos" on most of the siblings and nothing whatsoever on porn4fans and
+    viralxxxporn, which is why those two showed no figure under their button
+    on a performer page while the others did. The performer's own page states
+    it on every one of them.
+
+    Absent stays None. A zero is a real answer here -- "0 Photos" is what a
+    video-only performer's page says -- so it must survive as 0 rather than be
+    turned back into None by a falsiness test.
+    """
+
+    found: dict[str, int | None] = {}
+
+    for item in tree.xpath(
+        "//*[contains(concat(' ', normalize-space(@class), ' '), ' model-infos ')]"
+        "//*[contains(concat(' ', normalize-space(@class), ' '), ' item ')]"
+    ):
+        text = " ".join(item.text_content().split())
+        match = re.match(r"([\d.,KkMm]+)\s+(videos|photos|albums)\b", text, re.I)
+        if match:
+            found.setdefault(match.group(2).lower(), parse_count(match.group(1)))
+
+    photos = found.get("photos")
+    if photos is None:
+        photos = found.get("albums")
+    return found.get("videos"), photos

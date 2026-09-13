@@ -14,17 +14,22 @@
 
     let account = $state(null);
     let failed = $state(false);
-    /*
-        BOTH LIT BY DEFAULT, because the page is meant to read as the
-        performer's feed and that is what a feed contains. A Set rather than a
-        pair of booleans so the sections can ask `kinds.has(...)` without
-        knowing how many kinds exist.
+    let tab = $state("all");
 
-        Unselecting both is allowed and says so rather than silently snapping
-        back -- a control that refuses to reach a state it offers is worse
-        than one that lets you get there and tells you where you are.
+    /*
+        THE TABS ARE ONE CHOICE, NOT TWO SWITCHES, and the grid still asks for
+        everything regardless -- see `SiteSection`. "All" is the default
+        because the page is meant to read as the performer's feed and that is
+        what a feed contains; the other two are there because a reader looking
+        for video does not want to scroll past nineteen hundred photographs to
+        find it.
+
+        A Set rather than a tab name reaches the sections, so they can ask
+        `kinds.has(...)` without knowing how many tabs exist.
     */
-    let kinds = $state(new Set(["video", "image"]));
+    const kinds = $derived(
+        tab === "all" ? new Set(["video", "image"]) : new Set([tab])
+    );
     let opened = $state(new Set());
     /*
         Collapsed until asked, because an OnlyFans bio is 20-40 lines of
@@ -72,12 +77,6 @@
             ["likes", account?.likes_count]
         ].filter(([, value]) => value != null)
     );
-
-    function toggleKind(kind) {
-        const next = new Set(kinds);
-        next.has(kind) ? next.delete(kind) : next.add(kind);
-        kinds = next;
-    }
 
     function toggleSite(site) {
         const next = new Set(opened);
@@ -262,21 +261,15 @@
             </div>
         </div>
 
-        <div class="ofx-tabs" role="group" aria-label="Show">
-            {#each [["video", "Videos"], ["image", "Photos"]] as [kind, label] (kind)}
+        <div class="ofx-tabs" role="tablist" aria-label="Show">
+            {#each [["all", "All"], ["video", "Videos"], ["image", "Photos"]] as [value, label] (value)}
                 <button
                     class="ofx-tab"
-                    class:ofx-on={kinds.has(kind)}
+                    class:ofx-on={tab === value}
                     type="button"
-                    aria-pressed={kinds.has(kind)}
-                    onclick={() => toggleKind(kind)}>
-                    <span class="ofx-check" aria-hidden="true">
-                        {#if kinds.has(kind)}
-                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3">
-                                <path d="m5 12 5 5L20 7" />
-                            </svg>
-                        {/if}
-                    </span>
+                    role="tab"
+                    aria-selected={tab === value}
+                    onclick={() => (tab = value)}>
                     {label}
                 </button>
             {/each}
@@ -292,8 +285,17 @@
                 type="button"
                 onclick={() => toggleSite(source.site)}>
                 {source.site}
-                {#if source.video_count}
-                    <span class="ofx-count">{source.video_count}</span>
+                {#if source.video_count != null || source.image_count != null}
+                    <!--
+                        Both halves, because the two families hold different
+                        things: a KVS archive answers "45 videos, 0 photos" and
+                        fapello answers a single media tally with no split. A
+                        site that stated neither shows no figure rather than a
+                        zero it never claimed.
+                    -->
+                    <span class="ofx-count">
+                        {(source.video_count ?? 0) + (source.image_count ?? 0)}
+                    </span>
                 {/if}
             </button>
         {/each}

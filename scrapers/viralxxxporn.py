@@ -61,6 +61,17 @@ class ViralXXXPornScraper(DirectScraper):
     key = "viralxxxporn"
     name = "ViralXXXPorn"
     base_url = "https://viralxxxporn.com"
+    #: THE ONLY ONE OF THE SEVEN THAT WRITES ANYTHING. Measured across every
+    #: bundled archive: fapello publishes no text at all, and the four other
+    #: KVS siblings render an empty description block on every video page.
+    #: This site writes a paragraph per video.
+    #:
+    #: It is the site's own editorial copy, not the performer's caption -- the
+    #: captions live on onlyfans.com and on Coomer, and nothing reachable
+    #: carries them. A screen that draws these as post text is drawing what
+    #: this archive says about the video, which is worth showing and is not
+    #: the same claim.
+    has_post_text = True
     indexes_accounts = True
 
     def search(self, query: str, limit: int = 20) -> list[DirectVideo]:
@@ -73,6 +84,50 @@ class ViralXXXPornScraper(DirectScraper):
     def resolve(self, video_id: str) -> list[DirectSource]:
         response = self._get(f"{self.base_url}/video/{video_id}/-/")
         return _kvs_sources(response.text, self.base_url, self.key)
+
+    def video_info(self, video_id: str) -> DirectVideo | None:
+        """The paragraph and the age from a video's own page.
+
+        Text only. `resolve` is what mints a playable URL, and doing it here
+        as well would hand out expiring links for every card a reader merely
+        scrolled past.
+        """
+
+        try:
+            response = self._get(f"{self.base_url}/video/{video_id}/-/")
+        except Exception as exc:
+            logger.debug(f"{self.key}: no page for video {video_id}: {exc}")
+            return None
+
+        tree = lxml_html.fromstring(response.text)
+
+        blocks = tree.xpath(
+            "//div[contains(concat(' ', normalize-space(@class), ' '), ' description ')]"
+        )
+        description = " ".join(blocks[0].text_content().split()) if blocks else ""
+
+        ages = [
+            " ".join(text.split())
+            for text in tree.xpath(
+                "//*[contains(concat(' ', normalize-space(@class), ' '), ' vx-date ')]"
+                "//text()"
+            )
+        ]
+        posted = next((text for text in ages if _AGE_RE.match(text)), None)
+
+        if not description and not posted:
+            return None
+
+        headings = tree.xpath("//h1//text()")
+
+        return DirectVideo(
+            site=self.key,
+            video_id=video_id,
+            title=next((t.strip() for t in headings if t.strip()), ""),
+            page_url=f"{self.base_url}/video/{video_id}/-/",
+            description=description or None,
+            posted_at=posted,
+        )
 
     # --- Performer accounts -------------------------------------------------
 
@@ -167,7 +222,15 @@ def _accounts(page: str, base_url: str, key: str) -> list[DirectAccount]:
                 page_url=urljoin(base_url + "/", href),
                 avatar=_image_src(link, base_url),
                 # "2 videos" on most of the family, a bare count on the rest.
-                video_count=parse_count(_first_text(link, "card-item-text", "videos")),
+                # `_first_text` searches inside the anchor, and this site puts
+                # the figure in a sibling list -- "~ 154 videos" under a
+                # `vx-name` link. The family default is tried first so this
+                # stays a superset of the sibling behaviour rather than a
+                # replacement for it.
+                video_count=(
+                    parse_count(_first_text(link, "card-item-text", "videos"))
+                    or _card_count(link)
+                ),
             )
         )
 
@@ -201,7 +264,22 @@ def _profile(
     )
     bio = descriptions[0].text_content().strip() if descriptions else ""
 
-    if not avatar and not bio:
+    videos, photos = _model_tallies(tree)
+
+    # This template renders no statistic strip at all. It does state the
+    # figure in its own meta description -- "Watch all 322 leaked porn
+    # videos and OnlyFans clips from ..." -- which is the same number the
+    # model index card abbreviates as "~ 322 videos".
+    if videos is None:
+        meta = tree.xpath("//meta[@name='description']/@content")
+        stated = re.search(r"\ball\s+([\d.,KkMm]+)\s+\w", meta[0]) if meta else None
+        videos = parse_count(stated.group(1)) if stated else None
+
+    # A tally counts as something to add. viralxxxporn renders no avatar in
+    # the class this file looks for, so a profile carrying nothing but its
+    # counts used to be discarded whole -- and that site then showed no
+    # figure under its button anywhere in the UI.
+    if not avatar and not bio and videos is None and photos is None:
         return None
 
     return DirectAccount(
@@ -211,6 +289,8 @@ def _profile(
         page_url=f"{base_url}/models/{handle}/",
         avatar=avatar,
         bio=bio or None,
+        video_count=videos,
+        image_count=photos,
     )
 
 
@@ -242,6 +322,9 @@ def _videos(
                 thumbnail=_image_src(link, base_url),
                 duration=parse_duration(_first_text(link, "card-duration", "duration")),
                 views=parse_count(_first_text(link, "card-item-text", "views")),
+                # Verbatim, and from the card's sibling list for the same
+                # reason as the model count above.
+                posted_at=_card_date(link),
             )
         )
         if limit is not None and len(videos) >= limit:
@@ -519,3 +602,76 @@ def label_of(
 def _rank(source: DirectSource) -> int:
     match = _RESOLUTION_RE.search(source.resolution or source.label or "")
     return int(match.group(1)) if match else 0
+
+
+def _model_tallies(tree) -> tuple[int | None, int | None]:
+    """"45 Videos / 0 Photos" from a model page's statistic strip.
+
+    THE MODEL INDEX IS NOT THE ONLY PLACE THESE LIVE, and on two of the family
+    it is not a place they live at all: the card in `/models/` carries
+    "2 videos" on most of the siblings and nothing whatsoever on porn4fans and
+    viralxxxporn, which is why those two showed no figure under their button
+    on a performer page while the others did. The performer's own page states
+    it on every one of them.
+
+    Absent stays None. A zero is a real answer here -- "0 Photos" is what a
+    video-only performer's page says -- so it must survive as 0 rather than be
+    turned back into None by a falsiness test.
+    """
+
+    found: dict[str, int | None] = {}
+
+    for item in tree.xpath(
+        "//*[contains(concat(' ', normalize-space(@class), ' '), ' model-infos ')]"
+        "//*[contains(concat(' ', normalize-space(@class), ' '), ' item ')]"
+    ):
+        text = " ".join(item.text_content().split())
+        match = re.match(r"([\d.,KkMm]+)\s+(videos|photos|albums)\b", text, re.I)
+        if match:
+            found.setdefault(match.group(2).lower(), parse_count(match.group(1)))
+
+    photos = found.get("photos")
+    if photos is None:
+        photos = found.get("albums")
+    return found.get("videos"), photos
+
+
+def _card_siblings(link):
+    """The text of the card a grid anchor belongs to.
+
+    This site splits a card between the anchor (image, title, duration) and a
+    sibling ``<ul class="vx-list">`` (uploader, views, age, model tally), so
+    anything in the second half is invisible to a search rooted at the link.
+    Three levels is the whole card and stops short of the grid, which would
+    pull in the neighbouring card's figures.
+    """
+
+    for depth, node in enumerate(link.iterancestors()):
+        if depth >= 3:
+            break
+        for text in node.xpath(".//li//text()"):
+            text = " ".join(text.split())
+            if text:
+                yield text
+
+
+def _card_count(link) -> int | None:
+    for text in _card_siblings(link):
+        match = re.search(r"([\d.,KkMm]+)\s+videos\b", text, re.I)
+        if match:
+            return parse_count(match.group(1))
+    return None
+
+
+#: "6 days ago", "11 months ago" -- and never a bare number, which would match
+#: the view count sitting two list items above it.
+_AGE_RE = re.compile(
+    r"^\d+\s+(second|minute|hour|day|week|month|year)s?\s+ago$", re.I
+)
+
+
+def _card_date(link) -> str | None:
+    for text in _card_siblings(link):
+        if _AGE_RE.match(text):
+            return text
+    return None
