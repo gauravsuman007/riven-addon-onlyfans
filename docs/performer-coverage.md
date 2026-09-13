@@ -132,6 +132,47 @@ Coomer is the only source measured that carries real post text (`title`,
 its captions with fapello's files would mean matching posts between two
 archives with no shared id -- a guess presented as a quotation. Not built.
 
+### One archive does write text of its own
+
+Re-measured across all seven, 2026-09-13, on a video page from each:
+
+| site | paragraph on a video page | date on the card |
+|---|---|---|
+| viralxxxporn | **yes**, ~25 words per video | yes, "6 days ago" |
+| hornyfap | no | an `added` block only |
+| ultrathots, notfans, porn4fans, porntn | no | no |
+| fapello | no text anywhere, no date anywhere | no |
+
+viralxxxporn's paragraph is that archive's own editorial copy -- "flaunts her
+curves in a barely-there black thong" -- and not the performer's caption. It
+is worth showing and it is a different claim, so the UI presents it as the
+site's text about a post. `has_post_text` on the scraper and `/videoinfo`
+serve it; it costs one request per video, so the grid asks only for tiles
+scrolled into view and only where the flag is set.
+
+The site's two dates disagree with each other -- the model index card said
+"6 days ago" for a video whose own page says "11 months ago" -- so the card's
+value is preferred and the page's only fills a gap. Neither is parsed into a
+timestamp.
+
+## Asset tallies: where each site states them
+
+The figure under a site's button on a performer page. It was blank for three
+of seven, which reads as "this site has nothing" rather than "nobody asked":
+
+| site | model index card | performer's own page |
+|---|---|---|
+| ultrathots, notfans, hornyfap, porntn | "2 videos" | no strip |
+| porn4fans | nothing | `model-infos`: "45 Videos / 0 Photos" |
+| viralxxxporn | "~ 154 videos", beside the anchor not inside it | meta description: "all 322 ... videos" |
+| fapello | nothing | "Media 793" |
+
+The index walk only ever sees the first column, which is why the other three
+were blank. `_backfill_counts` in the router asks the second column for any
+source still missing both figures -- once per performer, on a page somebody
+opened, and persisted. Measured on belledelphine: six sources, all six figures
+present afterwards, one second on the first view and nothing on later ones.
+
 ## Ruled out
 - **thotslife, internetchicks, sexythots, influencersgonewild** -- WordPress
   blogs with a post per performer: no model index, no player, no `.mp4`.
