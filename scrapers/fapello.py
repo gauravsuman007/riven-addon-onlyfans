@@ -13,17 +13,23 @@ carrying `assets/images/icon-play.svg` is a video and every other card is an
 image. That one marker is what makes a mixed feed affordable -- the alternative
 is a request per item, and these performers run to thousands of items.
 
-**The media path is derived, not scraped.** A post's own page holds the URL,
-but fetching one page per card to learn something the card already determines
-costs a request each. The layout is::
+**The media path is read off the card, not guessed.** Every card carries its
+own thumbnail URL, and the other two files sit beside it::
 
-    https://fapello.com/content/<a>/<b>/<slug>/4000/<slug>_<n>_300px.jpg   grid
-    https://fapello.com/content/<a>/<b>/<slug>/4000/<slug>_<n>.jpg         full
-    https://cdn.fapello.com/content/<a>/<b>/<slug>/4000/<slug>_<n>.mp4     video
+    https://fapello.com/content/<a>/<b>/<slug>/<bucket>/<slug>_<n>_300px.jpg  grid
+    https://fapello.com/content/<a>/<b>/<slug>/<bucket>/<slug>_<n>.jpg        full
+    https://cdn.fapello.com/content/<a>/<b>/<slug>/<bucket>/<slug>_<n>.mp4    video
 
-where ``<a>`` and ``<b>`` are the slug's first two characters. Note the host
-differs: images are served by the site, video by ``cdn.``. Deriving is the
-whole reason a page of 32 mixed items costs one request.
+so the full image is the thumbnail without ``_300px`` and the video is that
+again on ``cdn.`` with an ``.mp4`` suffix. One request still yields 32 items.
+
+``<bucket>`` is the reason this is parsed rather than built. It is not a
+constant: it rounds the item number up to the next thousand, so post 1,053 is
+under ``/2000/`` and post 3,229 under ``/4000/``. Hard-coding the ``/4000/``
+that the first performers examined happened to use produced 404s for everyone
+with fewer than three thousand posts -- a whole-performer failure that looks
+exactly like an empty feed. The card already states it; reading it cannot
+drift.
 
 **It is an image site that also has video, and the ratio is per performer.**
 Measured over full feeds: bobbie-moore 454 videos in 1,920 items, mina-shirakawa
@@ -68,6 +74,9 @@ _PLAY_MARKER = "icon-play"
 _MEDIA_HOST = "https://fapello.com"
 _VIDEO_HOST = "https://cdn.fapello.com"
 
+_IMG_SRC_RE = re.compile(r'src="([^"]+)"')
+_VIDEO_SRC_RE = re.compile(r'src="(https?://[^"]+\.(?:mp4|m4v))"', re.IGNORECASE)
+
 
 
 class FapelloScraper(DirectScraper):
@@ -100,9 +109,17 @@ class FapelloScraper(DirectScraper):
         """The single rendition behind a post.
 
         `video_id` is ``<slug>/<n>``, because neither half identifies a post on
-        its own and this site has no global id. One source, no labels: fapello
-        publishes exactly one file per post and states no height anywhere, so
-        claiming a resolution would be inventing one.
+        its own and this site has no global id.
+
+        THE POST PAGE IS ASKED rather than the URL built, even though the feed
+        could hand one over. The path contains a bucket that rounds the item
+        number up to the next thousand, and while that rule held on every
+        performer measured, a wrong guess here is a 404 at play time -- the
+        worst place to find out. One request per playback is nothing next to
+        the video it is about to stream, and the page states the answer.
+
+        One source, no labels: fapello publishes exactly one file per post and
+        states no height anywhere, so claiming a resolution would invent one.
         """
 
         slug, _, number = video_id.rpartition("/")
@@ -110,16 +127,26 @@ class FapelloScraper(DirectScraper):
             logger.debug(f"{self.key}: {video_id!r} is not a <slug>/<n> id")
             return []
 
-        return [
-            DirectSource(
-                url=_media_url(_VIDEO_HOST, slug, number, "mp4"),
-                label="Source",
-                # No Referer: verified to serve 206 with byte ranges to a bare
-                # request. Sending one anyway would be cargo-culted from the
-                # KVS scrapers, where it is load-bearing.
-                headers={},
-            )
-        ]
+        try:
+            response = self._get(f"{self.base_url}/{slug}/{number}/")
+        except Exception as exc:
+            logger.debug(f"{self.key}: no post page for {video_id}: {exc}")
+            return []
+
+        for url in _VIDEO_SRC_RE.findall(response.text):
+            return [
+                DirectSource(
+                    url=url,
+                    label="Source",
+                    # No Referer: verified to serve 206 with byte ranges to a
+                    # bare request. Sending one would be cargo-culted from the
+                    # KVS scrapers, where it is load-bearing.
+                    headers={},
+                )
+            ]
+
+        logger.debug(f"{self.key}: no video on post {video_id}")
+        return []
 
     # --- Performer accounts -------------------------------------------------
 
@@ -154,9 +181,9 @@ class FapelloScraper(DirectScraper):
                 video_id=f"{handle}/{number}",
                 title=f"{_display(handle)} #{number}",
                 page_url=f"{self.base_url}/{handle}/{number}/",
-                thumbnail=_media_url(_MEDIA_HOST, handle, number, "jpg", thumb=True),
+                thumbnail=thumbnail,
             )
-            for number, body in cards
+            for number, body, thumbnail in cards
             if _PLAY_MARKER in body
         ]
 
@@ -166,17 +193,17 @@ class FapelloScraper(DirectScraper):
         return [
             DirectImage(
                 image_id=f"{handle}/{number}",
-                url=_media_url(_MEDIA_HOST, handle, number, "jpg"),
-                thumbnail=_media_url(_MEDIA_HOST, handle, number, "jpg", thumb=True),
+                url=_full_size(thumbnail),
+                thumbnail=thumbnail,
                 # Served to a bare request, same as the video CDN.
                 headers={},
             )
-            for number, body in cards
+            for number, body, thumbnail in cards
             if _PLAY_MARKER not in body
         ]
 
-    def _cards(self, handle: str, page: int) -> list[tuple[str, str]]:
-        """One page of the mixed feed as ``(number, card markup)`` pairs.
+    def _cards(self, handle: str, page: int) -> list[tuple[str, str, str]]:
+        """One page of the feed as ``(number, card markup, thumbnail)`` triples.
 
         Page one is the model page and the rest are ajax fragments; both carry
         the same cards, so both are read by the same regex. A page past the end
@@ -196,15 +223,30 @@ class FapelloScraper(DirectScraper):
             return []
 
         seen: set[str] = set()
-        cards: list[tuple[str, str]] = []
+        cards: list[tuple[str, str, str]] = []
 
         for slug, number, body in _CARD_RE.findall(response.text):
             # The template links other performers in its sidebar; only this
             # performer's own cards belong in their feed.
             if slug != handle or number in seen:
                 continue
+
+            thumbnail = next(
+                (
+                    src
+                    for src in _IMG_SRC_RE.findall(body)
+                    if f"/{handle}/" in src and "_300px" in src
+                ),
+                "",
+            )
+            # A card with no thumbnail of its own is not a post; skipping it is
+            # what keeps a template change from producing items whose media
+            # URLs are empty strings.
+            if not thumbnail:
+                continue
+
             seen.add(number)
-            cards.append((number, body))
+            cards.append((number, body, thumbnail))
 
         return cards
 
@@ -221,18 +263,14 @@ def _display(handle: str) -> str:
     return " ".join(part.capitalize() for part in handle.replace("_", "-").split("-"))
 
 
-def _media_url(host: str, slug: str, number: str, suffix: str, thumb: bool = False) -> str:
-    """Where this site keeps one post's file.
+def _full_size(thumbnail: str) -> str:
+    """The full-resolution file beside a grid thumbnail.
 
-    Derived rather than scraped -- see the module docstring. The two-letter
-    fan-out is the slug's own first two characters; a slug shorter than two
-    characters cannot exist here (the site's minimum is three), so no padding
-    case is handled.
+    The grid crop and the original differ only by the ``_300px`` marker, so
+    this is a rename rather than a second lookup.
     """
 
-    a, b = slug[0], slug[1]
-    name = f"{slug}_{number}{'_300px' if thumb else ''}.{suffix}"
-    return f"{host}/content/{a}/{b}/{slug}/4000/{name}"
+    return thumbnail.replace("_300px.", ".")
 
 
 def _accounts(page: str, key: str) -> list[DirectAccount]:
@@ -306,10 +344,15 @@ def _profile(page: str, key: str, handle: str) -> DirectAccount | None:
         (text.strip() for text in headings if text.strip()), _display(handle)
     )
 
+    # The template surrounds a profile with other performers -- recommended,
+    # trending, recently viewed -- and every one of those cards is also an
+    # image under /content/. Taking the first one put a stranger's photograph
+    # on the account: bobbie-moore came back wearing sarai-fonseca's. The
+    # performer's own files are the only ones with their slug in the path.
     avatars = [
         src
         for src in tree.xpath("//img/@src")
-        if "/content/" in src and "_300px" not in src
+        if f"/{handle}/" in src and "_300px" not in src
     ]
 
     total = None
