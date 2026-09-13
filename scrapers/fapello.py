@@ -85,6 +85,13 @@ class FapelloScraper(DirectScraper):
     base_url = "https://fapello.com"
     indexes_accounts = True
 
+    #: Slower than the family default, because this one enforces. An index
+    #: walk at one request a second got eleven pages in before every
+    #: subsequent request came back 403 -- and a 403 partway through a walk
+    #: looks exactly like the end of the index, so the run recorded eleven
+    #: accounts and called itself a success.
+    rate_limit = 0.5
+
     def search(self, query: str, limit: int = 20) -> list[DirectVideo]:
         """Videos by a performer whose name matches, via the site's own search.
 
