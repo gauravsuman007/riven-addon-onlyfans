@@ -1097,3 +1097,9 @@
     white-space: nowrap;
     font-size: 13px;
 }
+
+/* Pushed away from Cancel/Save: it is a different kind of action, and a
+   reset one button-width from Save is a reset somebody will press. */
+.ofx-drawer-reset {
+    margin-right: auto;
+}

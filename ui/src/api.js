@@ -139,6 +139,18 @@ export async function getLayout() {
     }
 }
 
+/** Forget the arrangement, so the page follows the add-on's own order again
+ *  -- including rows a later version adds. Switching every row off is a
+ *  different state and is kept forever; this is the way back from it. */
+export async function resetLayout() {
+    try {
+        const response = await fetch(LAYOUT, { method: "DELETE" });
+        return response.ok;
+    } catch {
+        return false;
+    }
+}
+
 export async function saveLayout(rails) {
     try {
         const response = await fetch(LAYOUT, {

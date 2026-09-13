@@ -18,7 +18,7 @@
     discover it is possible at all.
 -->
 <script>
-    import { getLayout, saveLayout } from "./api.js";
+    import { getLayout, resetLayout, saveLayout } from "./api.js";
 
     let {
         /** The rails as `/rails` describes them: order, title, note, key. */
@@ -72,6 +72,20 @@
 
     function titleOf(key) {
         return rails.find((rail) => rail.key === key)?.title ?? key;
+    }
+
+    async function reset() {
+        saving = true;
+        error = null;
+
+        if (await resetLayout()) {
+            await onsaved?.();
+            open = false;
+        } else {
+            error = "Could not reset.";
+        }
+
+        saving = false;
     }
 
     async function save() {
@@ -141,6 +155,18 @@
         {/if}
 
         <div class="ofx-drawer-foot">
+            <!--
+                Not "hide everything": an empty arrangement means "never
+                arranged", so the page follows the add-on's own order again
+                and gains rows a later version adds.
+            -->
+            <button
+                class="ofx-btn ofx-outline ofx-drawer-reset"
+                type="button"
+                disabled={saving}
+                onclick={reset}>
+                Reset
+            </button>
             <button class="ofx-btn ofx-outline" type="button" onclick={() => (open = false)}>
                 Cancel
             </button>
