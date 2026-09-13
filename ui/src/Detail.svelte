@@ -9,6 +9,7 @@
     import Poster from "./Poster.svelte";
     import Rail from "./Rail.svelte";
     import SiteSection from "./SiteSection.svelte";
+    import VpnControls from "./VpnControls.svelte";
 
     let { handle, navigate, host } = $props();
 
@@ -275,6 +276,20 @@
             {/each}
         </div>
     </header>
+
+    <!--
+        Above the sites, because it is about them.
+
+        Pressing a site below fetches from that archive and, if a video is
+        played, streams gigabytes from it. Whether either leaves through the
+        tunnel is a decision made here -- and the failing case is otherwise
+        silent: a routed purpose with the tunnel down returns nothing, which
+        from this page is indistinguishable from the site having nothing.
+
+        It renders nothing at all when no VPN is configured, which is the
+        default.
+    -->
+    <VpnControls />
 
     <div class="ofx-controls">
         <span class="ofx-note">Load from:</span>

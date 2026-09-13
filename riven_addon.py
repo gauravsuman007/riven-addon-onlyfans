@@ -19,10 +19,11 @@ service find them. Do not make these imports lazy to save startup time.
 
 from pathlib import Path
 
-from program.addons import Addon, AddonManifest, AddonNav, AddonTv
+from program.addons import Addon, AddonManifest, AddonNav, AddonRail, AddonTv
 
 from onlyfans_addon import config, profile, registry, router, service, tv
 from onlyfans_addon.models import metadata as onlyfans_metadata
+from onlyfans_addon.rails import RAILS
 from onlyfans_addon.settings import OnlyFansModel
 
 
@@ -45,7 +46,38 @@ class OnlyFansAddon(Addon):
         # nothing about a library item, so it has nothing to contribute to
         # one's page.
         tv=AddonTv(browse=True),
+        # Nothing the host can call would tell it this add-on fetches from
+        # six archive sites, so it says so. The consequence is not a badge:
+        # it is what puts this traffic in the tunnel the VPN settings
+        # configure.
+        capabilities=("scrapers",),
     )
+
+    def rails(self):
+        """The landing page's rows, offered to the host's pages too.
+
+        The SAME list the add-on's own page and the television already draw
+        (`onlyfans_addon/rails.py`), published in the host's vocabulary so
+        that Home and Explore can offer them in their rail pickers. One
+        definition, now three surfaces -- which is the whole reason that file
+        exists; see its docstring for the rail that only half the app got.
+
+        `default_page="own"` for every one of them: a performer row is this
+        add-on's landing page by nature, and putting one on somebody's Home
+        without being asked is a decision for the person whose Home it is.
+        """
+
+        return tuple(
+            AddonRail(
+                key=f"onlyfans:{rail.order}",
+                title=rail.title,
+                default_page="own",
+                endpoint=f"/railitems?order={rail.order}",
+                description=rail.note,
+                tv=rail.tv,
+            )
+            for rail in RAILS
+        )
 
     def settings_model(self):
         return OnlyFansModel

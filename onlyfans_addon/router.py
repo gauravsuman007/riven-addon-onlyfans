@@ -283,6 +283,63 @@ def list_rails() -> list[dict[str, Any]]:
     ]
 
 
+class RailCard(BaseModel):
+    """One card, in the HOST's vocabulary rather than this add-on's.
+
+    A rail drawn on the host's Home page is drawn by the host, which knows
+    nothing about a performer -- and the television's renderer knows less
+    still. So the same five fields the TV contract already uses are what
+    crosses: an id, something to read, something to look at, and where it
+    goes. The add-on's own page keeps using `/accounts` and its richer shape,
+    because it draws that itself.
+    """
+
+    id: str
+    title: str
+    subtitle: str = ""
+    image: str | None = None
+    #: "open" or "play" -- what the card DOES. Never a URL: this app and the
+    #: television have different addresses for the same performer, and a card
+    #: carrying one of them would be wrong on the other.
+    action: str = "open"
+
+
+class RailItems(BaseModel):
+    items: list[RailCard]
+
+
+@router.get("/railitems", operation_id="onlyfans_rail_items")
+def rail_items(
+    order: Annotated[str, Query()] = "carried",
+    limit: Annotated[int, Query(ge=1, le=60)] = 20,
+) -> RailItems:
+    """One rail's worth of cards, for whichever page is drawing it.
+
+    A thin normalising wrapper over `/accounts` rather than a second query:
+    the ordering, the paging and the 400 on an unknown order all stay in one
+    place, and a rail on somebody's Home page cannot drift from the same rail
+    on this add-on's own.
+    """
+
+    page = list_accounts(order=order, limit=limit)
+
+    return RailItems(
+        items=[
+            RailCard(
+                id=account.handle,
+                title=account.display_name,
+                subtitle=(
+                    f"{account.source_count} "
+                    f"{'site' if account.source_count == 1 else 'sites'}"
+                ),
+                image=account.avatar_url,
+                action="open",
+            )
+            for account in page.items
+        ]
+    )
+
+
 @router.get("/accounts", operation_id="list_onlyfans_accounts")
 def list_accounts(
     search: Annotated[str | None, Query()] = None,
