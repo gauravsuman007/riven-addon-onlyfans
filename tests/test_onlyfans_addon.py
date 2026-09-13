@@ -207,9 +207,19 @@ def test_every_rail_has_an_ordering():
     # And through the SAME arrangement the web page uses. A television that
     # walked RAILS directly would be correct and would still be the version
     # behind: it would ignore every row the viewer had moved or switched off.
+    #
+    # Asserted on the NAMES the code actually references, not on the text.
+    # The docstring above says "THE RAILS ARE NOT LISTED HERE", and a text
+    # search fails on the sentence that explains the rule it is checking.
+    referenced = {
+        node.id
+        for node in ast.walk(ast.parse(textwrap.dedent(source)))
+        if isinstance(node, ast.Name)
+    }
+
     check(
         "the television honours the saved arrangement",
-        "RAILS" not in source,
+        "RAILS" not in referenced,
         "tv_browse reads the unarranged list",
     )
 
