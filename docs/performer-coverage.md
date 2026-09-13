@@ -89,10 +89,50 @@ the moment those nodes answer** -- the API is documented, stable, paginated 50
 at a time at `/api/v1/onlyfans/user/<handle>/posts`, and attachment paths are
 plain `.mp4`. Re-test with four HTTPS range requests before writing any code.
 
-## Ruled out
+## What was added, and the mistake that nearly lost it
 
-- **fapello.com** -- soft-404s every performer slug tried, direct and via
-  search.
+**fapello.com and viralxxxporn.com now ship as scrapers.**
+
+fapello was written off in the first pass as "soft-404s every performer slug
+tried". That was wrong, and the cause is worth recording: the slugs were
+*guessed* from this index's handles (`izzygreen`, `caroline-zalog`) rather than
+read off fapello's own pages (`mina-shirakawa`, `bobbie-moore`). Every guess
+missed, and four misses in a row read as a broken site. **A site is not ruled
+out until its own listing pages have been enumerated** -- testing a site with
+another site's identifiers tests the mapping, not the site.
+
+What it holds, measured over full feeds (32 items a page, paged to exhaustion):
+
+| performer | items | of which video |
+|---|---|---|
+| bobbie-moore | 1,920+ | 454 |
+| mina-shirakawa | 1,920+ | 23 |
+| sophia-locke | 1,051 | 0 |
+| sumikowrestles | 171 | 0 |
+
+So it is **an image archive that sometimes has video**, and the ratio is per
+performer rather than a property of the site. It does not lift the video
+ceiling for everyone -- but sophia-locke, who has *one* video across the five
+KVS sites, has 1,051 photographs here. Its CDN answers `206 video/mp4` over
+byte ranges with no Referer, no token and no captcha.
+
+viralxxxporn is a plain KVS clone: the shared helpers parse it unchanged,
+`/models/` pages twenty performers at a time, and renditions resolve to
+`206 video/mp4`.
+
+## Post text is not available from anything reachable
+
+An OnlyFans post is a caption, a date and its media. fapello has none of the
+first two -- a post page says `Mina Shirakawa Video #3273` and carries no date
+anywhere in the markup. The KVS family titles a video after the performer and
+an act, which is a filename rather than a caption.
+
+Coomer is the only source measured that carries real post text (`title`,
+`content` and `published` per post) and its media is unreachable, so pairing
+its captions with fapello's files would mean matching posts between two
+archives with no shared id -- a guess presented as a quotation. Not built.
+
+## Ruled out
 - **thotslife, internetchicks, sexythots, influencersgonewild** -- WordPress
   blogs with a post per performer: no model index, no player, no `.mp4`.
 - **nudostar.tv, thothub.lol, leakedzone** -- a model index exists but the model
