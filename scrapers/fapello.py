@@ -178,6 +178,9 @@ class FapelloScraper(DirectScraper):
         response = self._get(f"{self.base_url}/ajax/top-likes/page-{max(page, 1)}/")
         return _accounts(response.text, self.key)
 
+    # The walk stops when a page yields nothing, and past the last page this
+    # endpoint answers 200 WITH AN EMPTY BODY -- see `_accounts`.
+
     def account_profile(self, handle: str) -> DirectAccount | None:
         try:
             response = self._get(f"{self.base_url}/{handle}/")
@@ -292,6 +295,19 @@ def _full_size(thumbnail: str) -> str:
 
 def _accounts(page: str, key: str) -> list[DirectAccount]:
     """Every performer card in an index page."""
+
+    # AN EMPTY BODY IS THE END OF THE INDEX, NOT A FAILURE.
+    #
+    # Past its last page the ajax endpoint answers 200 with zero bytes, and
+    # `lxml_html.fromstring("")` raises "Document is empty". That exception
+    # left the walk through the sync's per-site guard, which recorded fapello
+    # as a FAILED run and reported "indexed 0 accounts" -- after it had
+    # already stored 1,708. The run looked like a broken scraper in the
+    # settings tab and like a site with nothing in it from the log, and it was
+    # neither: it was a complete walk reporting its own successful ending as a
+    # crash.
+    if not page.strip():
+        return []
 
     tree = lxml_html.fromstring(page)
     accounts: list[DirectAccount] = []
