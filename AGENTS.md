@@ -396,3 +396,50 @@ working around a challenge page -- that is a bot filter, and a challenge is
 the engine declining. The account is left unstamped so it comes round again.
 If this needs to actually work, it needs a keyed search API, not a cleverer
 scrape.
+
+## A site is not ruled out until its own listings have been enumerated
+
+fapello was written off in one session and shipped as a scraper in the next.
+The first pass tried this index's handles as fapello slugs -- `izzygreen`,
+`caroline-zalog`, `jameliz` -- got four 404s, and concluded the site soft-404s
+everything. Its real slugs are `mina-shirakawa`, `bobbie-moore`,
+`sumikowrestles`, and they are printed on its own homepage.
+
+Testing a site with another site's identifiers tests the *mapping*, not the
+site. Read slugs off the site's listing pages before concluding anything about
+what it holds.
+
+## Declared limits that nothing enforces are worse than no limit
+
+`DirectScraper.rate_limit` existed from the first commit and was never applied.
+The fapello index walk found it: eleven pages served, then 403 on everything,
+including requests a user was waiting on. The run stored eleven accounts out of
+thousands and **reported success** -- a 403 partway through a walk is
+indistinguishable from the end of the index, so the walk stopped and the sync
+called it a clean finish.
+
+Two lessons, and the second is the general one:
+
+- Pace in `_get`, not in `_RoutedSession.request`. A scraper probing a
+  rendition with `session.head` is answering a click and must not queue behind
+  an index walk's budget.
+- **A walk that ends early must be able to say so.** "No more pages" and "the
+  site stopped talking to me" arrive as the same empty result, and only one of
+  them means the index is complete.
+
+## The two site families, and why `account_images` is separate
+
+The KVS archives file images into albums: `account_galleries` lists them and
+`gallery_images` opens one. The post-per-item archives (fapello and its clones)
+have no albums at all -- every item is its own post, images and video
+interleaved in one reverse-chronological feed, which is what an OnlyFans
+profile looks like.
+
+Collapsing the two would either mint thousands of one-image albums or throw
+away paging over a feed running to thousands of items. A site answers one or
+the other; the mixed grid asks both and interleaves the results.
+
+**Filter at draw time, not at fetch time.** The grid's Videos/Photos chips hide
+what is already loaded. Filtering the fetch means "load more" advances each
+feed by a different amount depending on which chips are lit, and turning a chip
+back on leaves a hole in the middle of the list.
