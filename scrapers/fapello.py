@@ -160,12 +160,22 @@ class FapelloScraper(DirectScraper):
     def list_accounts(self, page: int = 1) -> list[DirectAccount]:
         """One page of the site's performer index.
 
-        ``/top-likes/`` rather than the homepage: the homepage mixes a handful
-        of promoted performers into a feed of posts, while this is a plain
-        paginated list of people, which is the shape `list_accounts` promises.
+        ``/top-likes/`` rather than the homepage: the homepage mixes promoted
+        performers into a feed of posts, while this is a plain list of people,
+        which is the shape `list_accounts` promises.
+
+        THE AJAX FRAGMENT IS THE PAGINATION, and the obvious guess is a trap.
+        ``/top-likes/2/`` answers **200 with the site's soft-404 body**, not a
+        404 -- so a walk built on the family's usual trailing-segment paging
+        parses a not-found page, finds no performer cards in it, reads that as
+        the end of the index, and stops after page one. It stored 24 accounts
+        out of a site with thousands and reported a clean finish.
+
+        ``/ajax/top-likes/page-<n>/`` is what the page's own scroll calls, and
+        it pages properly.
         """
 
-        response = self._get(f"{self.base_url}/top-likes/{_page_suffix(page)}")
+        response = self._get(f"{self.base_url}/ajax/top-likes/page-{max(page, 1)}/")
         return _accounts(response.text, self.key)
 
     def account_profile(self, handle: str) -> DirectAccount | None:
