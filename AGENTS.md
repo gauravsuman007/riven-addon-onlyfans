@@ -443,3 +443,32 @@ the other; the mixed grid asks both and interleaves the results.
 what is already loaded. Filtering the fetch means "load more" advances each
 feed by a different amount depending on which chips are lit, and turning a chip
 back on leaves a hole in the middle of the list.
+
+## Account search is fuzzy, and the ordering has a trap in it
+
+`GET /accounts?search=` used to be two `ilike` clauses, which is a substring
+test rather than search: a single dropped letter returned nothing at all, and
+an empty page reads as "not indexed" rather than "mistyped".
+
+It now goes through the host's `program.utils.fuzzy`. That is a host import,
+like `program.db.db` and `program.utils.time` already were -- the add-on runs
+inside the host process and shares its database, so sharing its matching rules
+is what keeps a search of studios and a search of accounts behaving the same
+way. See the host's AGENTS.md for how the matching itself works.
+
+Two things specific to this table:
+
+* **The handle IS the collapsed spelling.** It is passed as `collapsed=`
+  rather than being collapsed again in SQL, which is the whole reason that
+  column is stored the way it is: "sophie rain", "sophierain" and
+  "Sophie-Rain" all reach the same account.
+* **TRAP: `order_by` APPENDS.** The relevance ranking has to be applied
+  BEFORE `_ORDERS[order](query)`, not after. Put it after and the rail's own
+  ordering leads while relevance becomes a tiebreak nobody ever reaches --
+  a search inside "newest" would return the newest accounts that happen to
+  match, in date order, which looks exactly like search not working.
+
+Migration `0005_name_trgm` adds the GIN indexes. They are a PERFORMANCE
+property only (tens of thousands of rows here, against ~1,200 in the studio
+directory), so they are `IF NOT EXISTS` with failures swallowed -- which means
+**verify them after deploying**, because a silent skip looks like success.

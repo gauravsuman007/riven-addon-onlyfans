@@ -39,7 +39,7 @@ from starlette.concurrency import run_in_threadpool
 from fastapi.responses import StreamingResponse
 from loguru import logger
 from pydantic import BaseModel
-from sqlalchemy import func, or_, select
+from sqlalchemy import func, select
 
 from program.db.db import db_session
 from onlyfans_addon.models import (
@@ -57,6 +57,7 @@ from onlyfans_addon.registry import reset as reset_of_registry
 from program.services.vpn import STREAMING, VpnUnavailable, vpn
 from onlyfans_addon.config import plugin_dir, save as save_settings
 from onlyfans_addon.config import settings as addon_settings
+from program.utils import fuzzy
 from program.utils.time import utcnow
 
 
@@ -392,11 +393,32 @@ def list_accounts(
             query = query.where(OnlyFansAccount.saved.is_(saved))
 
         if search and search.strip():
-            collapsed = normalise_handle(search)
+            # Fuzzy, so a dropped letter still finds the account -- see
+            # `program.utils.fuzzy`. The handle IS the collapsed spelling,
+            # which is why it is passed as `collapsed` rather than being
+            # collapsed again in SQL.
             query = query.where(
-                or_(
-                    OnlyFansAccount.handle.like(f"%{collapsed}%"),
-                    OnlyFansAccount.display_name.ilike(f"%{search.strip()}%"),
+                fuzzy.matches(
+                    search,
+                    OnlyFansAccount.display_name,
+                    session=session,
+                    collapsed=OnlyFansAccount.handle,
+                )
+            )
+
+        # A SEARCH has a better first ordering than any rail does: how well
+        # each account answers what was typed. This goes on BEFORE the rail's
+        # own ordering, because `order_by` APPENDS -- put it after and the
+        # rail leads while relevance becomes a tiebreak nobody ever reaches.
+        # The rail's order still decides between equally good matches, so
+        # "newest" inside a search still means newest.
+        if search and search.strip():
+            query = query.order_by(
+                *fuzzy.ranking(
+                    search,
+                    OnlyFansAccount.display_name,
+                    session=session,
+                    collapsed=OnlyFansAccount.handle,
                 )
             )
 
