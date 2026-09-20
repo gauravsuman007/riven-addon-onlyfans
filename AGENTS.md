@@ -468,7 +468,27 @@ Two things specific to this table:
   a search inside "newest" would return the newest accounts that happen to
   match, in date order, which looks exactly like search not working.
 
-Migration `0005_name_trgm` adds the GIN indexes. They are a PERFORMANCE
-property only (tens of thousands of rows here, against ~1,200 in the studio
-directory), so they are `IF NOT EXISTS` with failures swallowed -- which means
-**verify them after deploying**, because a silent skip looks like success.
+Migration `0005_name_trgm` adds the GIN indexes, and breaking it once taught
+two things worth keeping:
+
+* **Qualify the operator class: `public.gin_trgm_ops`.** The host runs an
+  add-on's migrations with `search_path` set to the add-on's OWN schema, so
+  an unqualified `gin_trgm_ops` fails with *operator class "gin_trgm_ops"
+  does not exist for access method "gin"*.
+* **An add-on's migrations run in a TRANSACTION**, unlike the host's, which
+  `env.py` runs under AUTOCOMMIT. The host's pattern -- try/except per
+  optional statement, carry on -- is therefore actively WRONG here: the first
+  failure poisons the transaction, alembic's own version bump dies with
+  `InFailedSqlTransaction`, and **the whole add-on fails to load**. Observed:
+  `Addons: 1 loaded, 1 failed (onlyfans)`, and the entire OnlyFans surface
+  gone because of an optional index. ASK whether the extension is usable and
+  skip if not; never attempt-and-catch.
+
+Creating the extension is the host's job, in `public`. Doing it here under the
+add-on's search_path would install a second copy into the add-on's schema.
+
+They are a PERFORMANCE property only (tens of thousands of rows here, against
+~1,200 in the studio directory), so **verify them after deploying** -- a skip
+is silent by design:
+
+    SELECT indexname FROM pg_indexes WHERE schemaname = 'onlyfans';
