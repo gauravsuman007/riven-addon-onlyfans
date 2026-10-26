@@ -202,8 +202,9 @@ turned out to be much thinner than the album listings suggest.
 ### Rejected candidates (2026-10-26 pass over theporndude's OnlyFans category)
 
 Shipped from this pass: `thothub.to`, `leakgallery.com`, `hornyfans.to`,
-`leak.xxx` (see their own docstrings). Everything below was evaluated and
-rejected, with the specific evidence, so it is not re-walked from scratch:
+`leak.xxx`, `x-video.tube`, `thothd.com`, `analegg.com`, `xxthots.com` (see
+their own docstrings). Everything below was evaluated and rejected, with the
+specific evidence, so it is not re-walked from scratch:
 
 - **A free-text tube search is not a performer index.** `erothots.is` has no
   working `/models/`, `/pornstar/` or `/pornstars/` — all three 302 to the
