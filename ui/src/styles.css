@@ -1142,3 +1142,15 @@
     color: var(--ofx-muted);
     font-weight: 500;
 }
+
+.ofx-settings-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    margin-bottom: 1rem;
+}
+
+.ofx-settings-head .ofx-settings-title {
+    margin: 0;
+}

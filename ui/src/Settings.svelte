@@ -8,7 +8,7 @@
     the server is really running the files you pushed.
 -->
 <script>
-    import { listScrapers } from "./api.js";
+    import { listScrapers, startSync, syncStatus } from "./api.js";
 
     let status = $state(null);
     let failed = $state(false);
@@ -19,9 +19,45 @@
         if (next) status = next;
     }
 
+    let sync = $state(null);
+    let starting = $state(false);
+
+    const refreshSync = async () => {
+        const next = await syncStatus();
+        if (next) sync = next;
+    };
+
+    async function run(sites) {
+        starting = true;
+        const next = await startSync(sites);
+        if (next) sync = next;
+        starting = false;
+    }
+
     $effect(() => {
         refresh();
+        refreshSync();
+        // Polled only while a walk is in flight: a finished sync has nothing
+        // new to say, and the weekly job can start one without this page.
+        const timer = setInterval(() => {
+            if (sync?.running) refreshSync();
+        }, 3000);
+        return () => clearInterval(timer);
     });
+
+    const runs = $derived(
+        Object.fromEntries((sync?.sites ?? []).map((row) => [row.site, row]))
+    );
+
+    function state(key) {
+        const row = runs[key];
+        if (!row) return "";
+        if (row.state === "running") return `running, page ${row.pages}, ${row.accounts_seen} seen`;
+        if (row.state === "ok")
+            return `${row.accounts_seen} accounts (+${row.accounts_new}) ${day(row.finished_at)}`;
+        if (row.state === "failed") return `failed: ${row.error ?? ""}`;
+        return "never run";
+    }
 
     const scrapers = $derived(status?.scrapers ?? []);
     const broken = $derived(Object.entries(status?.errors ?? {}));
@@ -30,6 +66,19 @@
 </script>
 
 <div class="ofx ofx-settings">
+    <div class="ofx-settings-head">
+        <p class="ofx-settings-title">
+            Account index{#if sync}: {sync.accounts} accounts, {sync.accounts_with_avatar} with a picture{/if}
+        </p>
+        <button
+            type="button"
+            class="ofx-btn"
+            disabled={starting || sync?.running}
+            onclick={() => run()}>
+            {sync?.running ? "Syncing…" : "Sync all sites now"}
+        </button>
+    </div>
+
     <p class="ofx-settings-title">Installed scrapers ({scrapers.length})</p>
     <p class="ofx-settings-note">
         Loaded from <code>{status?.plugin_dir ?? "…"}</code>. All of them run; the version is the
@@ -46,7 +95,7 @@
 
     <table class="ofx-settings-table">
         <thead>
-            <tr><th>Scraper</th><th>Site</th><th>Version</th><th>Updated</th></tr>
+            <tr><th>Scraper</th><th>Site</th><th>Version</th><th>Updated</th><th>Index</th><th></th></tr>
         </thead>
         <tbody>
             {#each scrapers as scraper (scraper.key)}
@@ -55,6 +104,16 @@
                     <td>{scraper.base_url}</td>
                     <td><code>{scraper.version}</code></td>
                     <td>{day(scraper.updated)}</td>
+                    <td>{scraper.indexes_accounts ? state(scraper.key) : ""}</td>
+                    <td>
+                        {#if scraper.indexes_accounts}
+                            <button
+                                type="button"
+                                class="ofx-btn"
+                                disabled={starting || runs[scraper.key]?.state === "running"}
+                                onclick={() => run([scraper.key])}>Sync</button>
+                        {/if}
+                    </td>
                 </tr>
             {/each}
         </tbody>

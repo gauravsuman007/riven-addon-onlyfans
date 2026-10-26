@@ -166,3 +166,21 @@ export async function saveLayout(rails) {
 
 /** The installed scrapers, with the version each is running. */
 export const listScrapers = () => get("/plugins");
+
+/** Per-site index progress, cheap enough to poll while a walk runs. */
+export const syncStatus = () => get("/sync/status");
+
+/** Start an index walk now; `sites` narrows it, omitted means every site. */
+export async function startSync(sites) {
+    const url = new URL(`${base}/sync`, window.location.origin);
+    for (const site of sites ?? []) url.searchParams.append("sites", site);
+
+    try {
+        const response = await fetch(url, { method: "POST" });
+        // 409 means a walk of that site is already running; the status
+        // endpoint shows it, so this is not worth an error of its own.
+        return response.ok ? await response.json() : null;
+    } catch {
+        return null;
+    }
+}
