@@ -991,3 +991,26 @@ and the settings tab shows a read-only list from `GET /plugins` (name, site,
 version, file date). `version` is the scraper's own attribute if it has one,
 else a hash of its file. Stale `sites`/`disabled` keys in a saved
 settings.json are ignored (pydantic drops unknown fields).
+
+## The account page is one merged feed
+
+`onlyfans_addon/feed.py`, served at `GET /accounts/{handle}/feed`, and drawn
+by `ui/src/Feed.svelte` and the TV's "All sites" choice. The per-site view
+still exists behind the "By site" tab. The module docstring has the full
+reasoning; the traps:
+
+- **Dates come three ways** (stated, relative, absent; measured 7/9/8 of 21
+  sources for one performer). Absent dates are borrowed from a duplicate or a
+  same-site neighbour; a site that dates nothing is interleaved by ratio. Do
+  not "simplify" undated items to the end of the list: those sites would
+  then never be seen.
+- **Never merge two items from one site.** porntn carries two different
+  "Anissa Kate-GLORYHOLE" scenes.
+- **Offsets are append-only.** A slow site (20s+ is normal for hornysimp and
+  jizzy) delivers after the list has moved past its dates; its entries are
+  flagged `late` and the client inserts them by date. Re-sorting server-side
+  would shift every offset the client already paged through.
+- **`DEADLINE` (4s) is per request, not per site.** Raising it makes every
+  page as slow as the slowest archive.
+- **Feeds are in-process memory, 20 min TTL.** A restart empties them; that
+  is a re-read, not a bug.

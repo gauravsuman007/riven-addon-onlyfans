@@ -52,6 +52,9 @@ PAGE = 60
 #: through.
 TV_PAGE = 10
 
+#: The choice that draws the merged feed rather than one site.
+ALL_SITES = "all"
+
 
 def _thumbnail(site: str, url: str | None) -> str:
     """The picture for one card, direct or proxied.
@@ -309,9 +312,10 @@ def tv_detail(
     got through. The web page never had that problem because each site is a
     button there -- the viewer asks for one.
 
-    So the television asks for one too. Without a `choice` this answers the
-    performer and the list of sites to pick from and fetches NOTHING; with
-    one, it fetches that site alone.
+    So the television asks for one too. Without a `choice` it now opens on
+    "All sites": the merged feed, ten cards from a list the backend builds
+    once and keeps, which is what made a single screen across every site
+    affordable. A site's own `choice` still fetches that site alone.
 
     `cursor` is how many cards to show, and it is deliberately a count rather
     than an offset: a television has no way to append to a page, so "Load
@@ -362,7 +366,21 @@ def tv_detail(
     # ordering the web page's buttons use, and for the same reason: the
     # archive with four hundred videos is a better first press than the one
     # with one.
+    # "All sites" first and by default: the merged feed (see
+    # `onlyfans_addon/feed.py`), newest first and deduplicated -- the same
+    # list the web page opens on. Unlike the old fetch-everything screen this
+    # one is cheap to open: a screenful of ten, from a feed the backend keeps.
+    if choice is None:
+        choice = ALL_SITES
+
     choices = [
+        {
+            "id": ALL_SITES,
+            "label": "All sites",
+            "note": "newest first",
+            "active": choice == ALL_SITES,
+        }
+    ] + [
         {
             "id": source.site,
             "label": source.site,
@@ -375,8 +393,22 @@ def tv_detail(
     sections: list[dict[str, Any]] = []
     more: str | None = None
 
-    if choice is None:
-        lines.append("Pick a site to load this performer's videos from.")
+    if choice == ALL_SITES:
+        from onlyfans_addon.router import merged_feed
+
+        try:
+            feed = merged_feed(id, 0, show + 1, "video")
+            entries = feed.items
+        except Exception as exc:
+            logger.debug(f"OnlyFans TV: feed failed for {id}: {exc}")
+            entries = []
+            lines.append("Could not read this performer's sites.")
+        if len(entries) > show or (entries and not feed.done):
+            more = str(show + TV_PAGE)
+        if entries:
+            sections.append({"title": "All sites", "cards": _feed_cards(entries[:show])})
+        elif not lines or not lines[-1].startswith("Could not"):
+            lines.append("None of this performer's sites has anything yet.")
     elif not any(entry["id"] == choice for entry in choices):
         # Bookmarked from before, or a source that has since gone. Named
         # rather than silently falling back to another site's videos, which
@@ -491,6 +523,29 @@ def _videos_upto(handle: str, site: str, wanted: int) -> list:
             break
 
     return collected
+
+
+def _feed_cards(entries: list) -> list[dict[str, Any]]:
+    """Merged-feed entries as cards: the playing copy, plus where else it is."""
+
+    return [
+        {
+            "id": f"{entry.site}:{entry.id}",
+            "title": entry.title,
+            "image": _thumbnail(entry.site, entry.thumbnail),
+            "duration": int(entry.duration or 0),
+            "badges": [
+                value
+                for value in (
+                    str(entry.resolution) if entry.resolution else "",
+                    f"{len(entry.copies)} sites" if len(entry.copies) > 1 else entry.site,
+                )
+                if value
+            ],
+            "action": "play",
+        }
+        for entry in entries
+    ]
 
 
 def _video_cards(videos: list) -> list[dict[str, Any]]:

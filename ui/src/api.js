@@ -69,6 +69,13 @@ export const getAccount = (handle) => get(`/accounts/${encodeURIComponent(handle
 */
 export const similarAccounts = (handle) =>
     get(`/accounts/${encodeURIComponent(handle)}/similar`);
+/*
+    Every site's content for one performer as one merged, deduplicated,
+    newest-first list. `kinds` is all, video or image; paging is by `offset`
+    over a list the backend keeps, so it never re-reads sites from the top.
+*/
+export const accountFeed = (handle, { offset = 0, limit = 30, kinds = "all" } = {}) =>
+    get(`/accounts/${encodeURIComponent(handle)}/feed`, { offset, limit, kinds });
 export const accountVideos = (handle, site, page) =>
     get(`/accounts/${encodeURIComponent(handle)}/videos`, { site, page });
 export const accountGalleries = (handle, site, page) =>

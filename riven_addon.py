@@ -21,7 +21,7 @@ from pathlib import Path
 
 from program.addons import Addon, AddonManifest, AddonNav, AddonRail, AddonTv
 
-from onlyfans_addon import config, profile, registry, router, service, tv
+from onlyfans_addon import config, feed, profile, registry, router, service, tv
 from onlyfans_addon.models import metadata as onlyfans_metadata
 from onlyfans_addon.rails import RAILS
 from onlyfans_addon.settings import OnlyFansModel

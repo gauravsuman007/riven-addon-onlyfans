@@ -1154,3 +1154,32 @@
 .ofx-settings-head .ofx-settings-title {
     margin: 0;
 }
+
+/* The merged feed: which sites a video was found on, each one playable. */
+.ofx-copy {
+    background: none;
+    border: 0;
+    padding: 0 0.35em 0 0;
+    font: inherit;
+    color: var(--ofx-muted);
+    cursor: pointer;
+    text-decoration: underline dotted;
+    text-underline-offset: 2px;
+}
+
+.ofx-copy:hover,
+.ofx-copy.ofx-on {
+    color: var(--ofx-fg);
+}
+
+.ofx-copy-site {
+    color: var(--ofx-muted);
+}
+
+.ofx-feed-status {
+    margin: 0 0 0.75rem;
+}
+
+.ofx-feed-sentinel {
+    height: 1px;
+}

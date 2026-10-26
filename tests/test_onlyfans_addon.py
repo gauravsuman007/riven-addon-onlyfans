@@ -411,6 +411,104 @@ def test_no_scraper_invents_a_performer_it_does_not_carry():
         )
 
 
+def test_the_merged_feed():
+    """Dates, duplicates and order across sites -- see onlyfans_addon/feed.py."""
+
+    import time as _time
+    from dataclasses import dataclass as _dc
+    from datetime import datetime as _dt, timedelta as _td, timezone as _tz
+
+    from onlyfans_addon.feed import Feed, name_words, parse_posted, same_video, title_tokens
+
+    now = _dt(2026, 10, 26, tzinfo=_tz.utc)
+    check("ISO date", parse_posted("2026-10-24T17:56:47.000Z", now) == (_dt(2026, 10, 24, 17, 56, 47, tzinfo=_tz.utc).timestamp(), False))
+    check("month-first date", parse_posted("June 22nd, 2023", now)[0] == _dt(2023, 6, 22, tzinfo=_tz.utc).timestamp())
+    check("day-first date", parse_posted("22 June 2023", now)[0] == _dt(2023, 6, 22, tzinfo=_tz.utc).timestamp())
+    check("relative date is approximate", parse_posted("2 months ago", now) == ((now - _td(days=60)).timestamp(), True))
+    check("unreadable date is None", parse_posted("garbage", now) == (None, False))
+
+    names = name_words("Anissa Kate", "anissakate", "anissa-kate")
+
+    @_dc
+    class E:
+        site: str
+        title: str
+        duration: int | None = None
+
+        @property
+        def tokens(self):
+            return title_tokens(self.title, names)
+
+    check(
+        "same title on two sites is one video, whatever the durations",
+        same_video(E("hornyleak", "Anissa Kate And Raissa Bellini's Fivesome Sex", 1585),
+                   E("leakgrl", "Anissa Kate And Raissa Bellini's Fivesome Sex", 804)),
+    )
+    check(
+        "equal duration and some shared words is one video",
+        same_video(E("onlyleaks", "Anissa Kate gets her tight pussy stretched by rough BBC with Eddie Jay", 991),
+                   E("fapnut", "Anissa Kate, Eddie Jay - Rough BBC", 990)),
+    )
+    check(
+        "two scenes on ONE site are never merged",
+        not same_video(E("porntn", "Anissa Kate-GLORYHOLE", 1325), E("porntn", "Anissa Kate-GLORYHOLE", 1325)),
+    )
+    check(
+        "a generic shared word is not identity",
+        not same_video(E("a", "Anissa Kate Masturbation"), E("b", "Anissa Kate Masturbation")),
+    )
+
+    @_dc
+    class V:
+        video_id: str
+        title: str
+        posted_at: str | None = None
+        duration: int | None = None
+        thumbnail: str | None = None
+        resolution: str | None = None
+        description: str | None = None
+
+    class Site:
+        has_post_text = False
+
+        def __init__(self, pages, delay=0.0):
+            self.pages, self.delay = pages, delay
+
+        def account_videos(self, handle, page):
+            _time.sleep(self.delay)
+            if page > len(self.pages):
+                raise Exception("404")
+            return self.pages[page - 1]
+
+        def account_galleries(self, handle, page):
+            return []
+
+    day = lambda n: (_dt.now(_tz.utc) - _td(days=n)).strftime("%B %d, %Y")
+    sites = {
+        "dated": Site([[V("d0", "Alpha scene one", day(0)), V("d1", "Bravo scene two", day(6))],
+                       [V("d2", "Charlie scene three", day(12))]]),
+        "relative": Site([[V("r1", "Hotel sextape bravo alpha", "4 days ago", 600)]]),
+        "nodate": Site([[V("n1", "Anissa Kate - Hotel Sextape Bravo Alpha", None, 601), V("n2", "Plain clip", None, 90)]]),
+        "slow": Site([[V("s1", "Newest of all uploads here", day(1))]], delay=1.5),
+    }
+    feed = Feed("anissakate", [(k, "anissa-kate") for k in sites], frozenset({"video"}), sites, names, lambda *a: [])
+    feed.fill(10, deadline=0.5)
+    first = [e.id for e in feed.emitted]
+    check("the feed answers before a slow site does", "s1" not in first, str(first))
+    dated = [e.ts for e in feed.emitted if e.ts is not None]
+    check("dated entries are newest first", dated == sorted(dated, reverse=True), str(first))
+    merged = next((e for e in feed.emitted if len(e.copies) > 1), None)
+    check("a cross-site duplicate is one entry", merged is not None and {c.site for c in merged.copies} == {"relative", "nodate"})
+    check("the longest copy plays", merged is not None and merged.site == "nodate")
+    check("the duplicate borrows the dated copy's date", merged is not None and merged.ts is not None)
+    check("an undated site is interleaved, not dropped", "n2" in first, str(first))
+
+    _time.sleep(1.6)
+    feed.fill(20, deadline=2)
+    late = [e for e in feed.emitted if e.id == "s1"]
+    check("a slow site's entry arrives flagged late", bool(late) and late[0].late)
+
+
 test_every_scraper_request_goes_through_the_routed_session()
 test_the_vendored_copies_have_not_drifted()
 test_the_ranking_maths()
@@ -418,6 +516,7 @@ test_every_rail_has_an_ordering()
 test_the_username_identity_check()
 test_the_similarity_terms()
 test_no_scraper_invents_a_performer_it_does_not_carry()
+test_the_merged_feed()
 
 print(f"\n{PASS} passed, {FAIL} failed")
 sys.exit(1 if FAIL else 0)

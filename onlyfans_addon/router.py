@@ -30,6 +30,7 @@ import tempfile
 import threading
 import time
 from dataclasses import asdict
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Annotated, Any
 
@@ -48,6 +49,7 @@ from onlyfans_addon.models import (
     OnlyFansAccountTerm,
     OnlyFansSyncRun,
 )
+from onlyfans_addon import feed as feeds
 from onlyfans_addon.rails import PAGE as RAIL_PAGE, arranged
 from onlyfans_addon.scraper_api.base import BROWSER_HEADERS
 from onlyfans_addon.service import OnlyFansService, normalise_handle
@@ -949,6 +951,157 @@ def account_images(
         )
         for index, image in enumerate(images)
     ]
+
+
+# --- The merged feed --------------------------------------------------------
+
+
+class FeedCopyResponse(BaseModel):
+    """One site's copy of a feed entry -- where else the same video is."""
+
+    site: str
+    id: str
+    duration: int | None = None
+    resolution: str | None = None
+
+
+class FeedEntryResponse(BaseModel):
+    #: "video", "gallery" or "photo".
+    kind: str
+    key: str
+    #: The copy that plays: the longest of the copies found.
+    site: str
+    id: str
+    title: str
+    thumbnail: str | None = None
+    duration: int | None = None
+    resolution: str | None = None
+    #: ISO date-time, or None when nothing could date it.
+    posted_at: str | None = None
+    #: The site's own wording, kept so "2 months ago" is not shown as a
+    #: precise date it never was.
+    posted_label: str | None = None
+    #: The date is relative, or borrowed from a duplicate or a neighbour.
+    approximate: bool = False
+    description: str | None = None
+    #: A copy whose site keeps text on the video's page -- ask `/videoinfo`
+    #: with this site and id. None when no copy has any.
+    text_site: str | None = None
+    text_id: str | None = None
+    #: Photos only: what `/photo` takes to serve it.
+    page: int | None = None
+    index: int | None = None
+    image_count: int | None = None
+    #: Arrived after the list had moved past its date (a slow site). Insert
+    #: it by `posted_at` among what is already shown rather than appending.
+    late: bool = False
+    copies: list[FeedCopyResponse] = []
+
+
+class FeedSourceResponse(BaseModel):
+    site: str
+    #: "loading", "more", "done" or "failed".
+    state: str
+    items: int
+    error: str | None = None
+
+
+class FeedResponse(BaseModel):
+    items: list[FeedEntryResponse]
+    #: What to pass as `offset` for the next page.
+    next_offset: int
+    #: Every site has been read to its end and everything shown.
+    done: bool
+    sources: list[FeedSourceResponse]
+
+
+def _feed_entry(entry: "feeds.Entry") -> FeedEntryResponse:
+    texted = next((copy for copy in entry.copies if copy.has_text), None)
+    return FeedEntryResponse(
+        kind=entry.kind,
+        key=entry.key,
+        site=entry.site,
+        id=entry.id,
+        title=entry.title,
+        thumbnail=entry.thumbnail,
+        duration=entry.duration,
+        resolution=entry.resolution,
+        posted_at=(
+            datetime.fromtimestamp(entry.ts, timezone.utc).isoformat()
+            if entry.ts is not None
+            else None
+        ),
+        posted_label=entry.posted_label,
+        approximate=entry.ts_source in ("relative", "inferred"),
+        description=entry.description,
+        text_site=texted.site if texted else None,
+        text_id=texted.id if texted else None,
+        page=entry.page,
+        index=entry.index,
+        image_count=entry.image_count,
+        late=entry.late,
+        copies=[
+            FeedCopyResponse(site=c.site, id=c.id, duration=c.duration, resolution=c.resolution)
+            for c in entry.copies
+        ],
+    )
+
+
+def merged_feed(handle: str, offset: int, limit: int, kinds: str, refresh: bool = False, deadline: float | None = None) -> FeedResponse:
+    """The feed itself, callable from the television's routes too."""
+
+    with db_session() as session:
+        account = _lookup(session, handle)
+        sources = [(source.site, source.site_handle) for source in account.sources]
+        names = feeds.name_words(
+            account.display_name,
+            account.handle,
+            account.of_username,
+            *(site_handle for _, site_handle in sources),
+        )
+        key = account.handle
+
+    wanted = frozenset({"video", "image"}) if kinds == "all" else frozenset({kinds})
+
+    feed = feeds.get_feed(
+        key,
+        wanted,
+        lambda: feeds.Feed(key, sources, wanted, of_registry().services, names, _account_images),
+        refresh=refresh,
+    )
+
+    with feed.lock:
+        feed.fill(offset + limit, deadline=deadline if deadline is not None else feeds.DEADLINE)
+        page = feed.emitted[offset : offset + limit]
+        return FeedResponse(
+            items=[_feed_entry(entry) for entry in page],
+            next_offset=offset + len(page),
+            done=feed.done and offset + len(page) >= len(feed.emitted),
+            sources=[FeedSourceResponse(**row) for row in feed.status()],
+        )
+
+
+@router.get("/accounts/{handle}/feed", operation_id="get_onlyfans_account_feed")
+def account_feed(
+    handle: str,
+    offset: Annotated[int, Query(ge=0)] = 0,
+    limit: Annotated[int, Query(ge=1, le=100)] = 30,
+    kinds: Annotated[str, Query(pattern="^(all|video|image)$")] = "all",
+    refresh: Annotated[bool, Query()] = False,
+) -> FeedResponse:
+    """Everything every site carries for this performer, as one list.
+
+    Newest first, each video once however many archives copied it, and with
+    whatever text any copy has. See `onlyfans_addon/feed.py` for how a feed is
+    merged from sites that agree on neither dates nor titles.
+
+    Paged by `offset` over a merged list kept in memory for twenty minutes,
+    so scrolling only ever reads the sites further, never again from the top.
+    A request answers within `feed.DEADLINE` seconds with what it has; a site
+    still loading joins on the next request, and `sources` says which.
+    """
+
+    return merged_feed(handle, offset, limit, kinds, refresh)
 
 
 @router.get("/photo", operation_id="get_onlyfans_photo")

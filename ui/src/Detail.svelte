@@ -8,6 +8,7 @@
     } from "./api.js";
     import Poster from "./Poster.svelte";
     import Rail from "./Rail.svelte";
+    import Feed from "./Feed.svelte";
     import SiteSection from "./SiteSection.svelte";
     import VpnControls from "./VpnControls.svelte";
 
@@ -32,6 +33,12 @@
         tab === "all" ? new Set(["video", "image"]) : new Set([tab])
     );
     let opened = $state(new Set());
+    /*
+        The merged feed is the page. "By site" is the old one-list-per-archive
+        view, kept for the case the feed cannot answer: which site has what,
+        and reading one archive's list as that archive orders it.
+    */
+    let view = $state("feed");
     /*
         Collapsed until asked, because an OnlyFans bio is 20-40 lines of
         marketing copy and `.ofx-bio` honours every line break in it. Left
@@ -292,6 +299,27 @@
     <VpnControls />
 
     <div class="ofx-controls">
+        <div class="ofx-tabs" role="tablist" aria-label="View">
+            {#each [["feed", "Feed"], ["sites", "By site"]] as [value, label] (value)}
+                <button
+                    class="ofx-tab"
+                    class:ofx-on={view === value}
+                    type="button"
+                    role="tab"
+                    aria-selected={view === value}
+                    onclick={() => (view = value)}>
+                    {label}
+                </button>
+            {/each}
+        </div>
+
+        <button class="ofx-btn" type="button" onclick={() => navigate("/x/onlyfans")}>
+            ← All accounts
+        </button>
+    </div>
+
+    {#if view === "sites"}
+    <div class="ofx-controls">
         <span class="ofx-note">Load from:</span>
         {#each account.sources as source (source.site)}
             <button
@@ -314,29 +342,35 @@
                 {/if}
             </button>
         {/each}
-
-        <button class="ofx-btn" type="button" onclick={() => navigate("/x/onlyfans")}>
-            ← All accounts
-        </button>
     </div>
+    {/if}
 
     {#if lightboxError}
         <p class="ofx-error">{lightboxError}</p>
     {/if}
 
-    {#if opened.size === 0}
-        <p class="ofx-note">Pick a site above to load this performer's content from it.</p>
-    {/if}
-
-    {#each account.sources.filter((source) => opened.has(source.site)) as source (source.site)}
-        <SiteSection
+    {#if view === "feed"}
+        <Feed
             handle={account.handle}
-            site={source.site}
-            {kinds}
+            kind={tab}
             onplay={(video) => play(video)}
             ongallery={openGallery}
             onphoto={openPhoto} />
-    {/each}
+    {:else}
+        {#if opened.size === 0}
+            <p class="ofx-note">Pick a site above to load this performer's content from it.</p>
+        {/if}
+
+        {#each account.sources.filter((source) => opened.has(source.site)) as source (source.site)}
+            <SiteSection
+                handle={account.handle}
+                site={source.site}
+                {kinds}
+                onplay={(video) => play(video)}
+                ongallery={openGallery}
+                onphoto={openPhoto} />
+        {/each}
+    {/if}
 
     <!--
         Last, and it hides itself when it has nothing.

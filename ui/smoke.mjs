@@ -39,6 +39,19 @@ globalThis.IntersectionObserver = class {
 };
 dom.window.IntersectionObserver = globalThis.IntersectionObserver;
 
+const feedItem = (id, title, posted_at, copies) => ({
+    kind: "video",
+    key: `v:hornyfap:${id}`,
+    site: "hornyfap",
+    id,
+    title,
+    thumbnail: "http://x/t.jpg",
+    duration: 600,
+    posted_at,
+    approximate: false,
+    copies: copies ?? [{ site: "hornyfap", id, duration: 600 }]
+});
+
 const calls = [];
 globalThis.fetch = async (url) => {
     calls.push(String(url));
@@ -91,6 +104,29 @@ globalThis.fetch = async (url) => {
                   ]
                 : String(url).includes("/images")
                 ? [{ index: 0, image_id: "demo/12", width: null, height: null }]
+                // The merged feed. Page one is a merged video (two copies) and
+                // an older one; page two is a slow site's entry that belongs
+                // BETWEEN them and says so with `late`.
+                : String(url).includes("/feed")
+                ? new URL(String(url)).searchParams.get("offset") === "0"
+                    ? {
+                          items: [
+                              feedItem("v1", "Newest Feed Clip", "2026-10-20T00:00:00+00:00", [
+                                  { site: "hornyfap", id: "v1", duration: 600 },
+                                  { site: "fig", id: "f9", duration: 598 }
+                              ]),
+                              feedItem("v2", "Older Feed Clip", "2026-10-01T00:00:00+00:00")
+                          ],
+                          next_offset: 2,
+                          done: false,
+                          sources: [{ site: "hornysimp", state: "loading", items: 0 }]
+                      }
+                    : {
+                          items: [{ ...feedItem("v3", "Late Feed Clip", "2026-10-10T00:00:00+00:00"), late: true }],
+                          next_offset: 3,
+                          done: true,
+                          sources: [{ site: "hornysimp", state: "done", items: 1 }]
+                      }
                 : String(url).includes("/accounts/")
                 ? {
                       handle: "demo",
@@ -243,6 +279,35 @@ console.log(
     nothing. The request COUNT is therefore asserted as well as the result:
     "it rendered" alone would have passed even while looping.
 */
+/*
+    THE MERGED FEED, which is what the page opens on.
+
+    The second page holds an entry a slow site delivered after the list had
+    moved past its date. Paging is append-only on the server, so the page has
+    to slot it in by date itself -- appended, the newest content of a slow
+    archive would sit at the bottom of the feed forever.
+*/
+await new Promise((r) => setTimeout(r, 300));
+const feedHtml = target.innerHTML;
+console.log("feed is the default view:", feedHtml.includes("Newest Feed Clip"));
+console.log("a merged video offers each copy:", feedHtml.includes(">fig<") && feedHtml.includes(">hornyfap<"));
+console.log("says which sites are still loading:", /Still loading: hornysimp/.test(feedHtml) || calls.filter((c) => c.includes("/feed")).length > 1);
+const order = ["Newest Feed Clip", "Late Feed Clip", "Older Feed Clip"].map((t) => target.innerHTML.indexOf(t));
+console.log("a late entry is inserted by date:", order.every((at) => at >= 0) && order[0] < order[1] && order[1] < order[2], order);
+console.log("feed pages without refetching page one:", calls.filter((c) => c.includes("/feed") && c.includes("offset=0")).length === 1);
+
+const copyButton = [...target.querySelectorAll(".ofx-copy")].find((b) => b.textContent.trim() === "fig");
+copyButton?.click();
+await new Promise((r) => setTimeout(r, 50));
+console.log("a copy chip plays that site's copy:", played.at(-1)?.site === "fig" && played.at(-1)?.videoId === "f9");
+played.length = 0;
+
+// The per-site view, behind its own tab now.
+[...target.querySelectorAll('[role="tab"]')]
+    .find((b) => (b.textContent || "").trim() === "By site")
+    ?.dispatchEvent(new dom.window.Event("click", { bubbles: true }));
+await new Promise((r) => setTimeout(r, 100));
+
 const before = calls.length;
 const siteButton = [...target.querySelectorAll("button")].find((b) =>
     (b.textContent || "").includes("hornyfap")
