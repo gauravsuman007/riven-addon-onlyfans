@@ -62,13 +62,15 @@ class OnlyFansModel(BaseModel):
         ),
     )
     feed_batch_size: int = Field(
-        default=20,
+        default=60,
         ge=1,
         le=500,
         description=(
             "Feeds to build per run, stalest first. Each reads every site the "
-            "performer is on a page or two deep, so this is paced by the "
-            "sites' rate limits, not by the server."
+            "performer is on a page or two deep -- measured ~4s apiece -- and "
+            "builds run one at a time, so a bigger batch is a longer run, not "
+            "more load on any one site. 60 every 30 minutes covers ~1,000 "
+            "kept performers in about eight hours."
         ),
     )
     feed_max_age_hours: int = Field(
