@@ -24,6 +24,15 @@ performers** (`vip-nude-videos`, `xxx-videos` confirmed) --
 terms, same caveat `nudostar.py` already carries for its own taxonomy
 noise.
 
+**A category archive lists unrelated posts too.** Below the category's
+own posts sits a "more posts" grid in identical `entry-title` card markup,
+so `_items` keeps a post only if its own `<article>` carries
+`category-<handle>` (`_in_category`). Measured 2026-10-27 over ten sampled
+performers: all 260 videos the scraper served came from that grid and
+belonged to other people. jizzy files video posts under its generic
+categories (`xxx-videos`), not under performers, so a performer here is
+photos only -- an empty video list is the right answer, not a gap.
+
 **A category archive page shows teaser excerpts only; the real media is
 on each post's own permalink** -- same shape as `nudostar.py`.
 `account_videos`/`account_images` open the archive page for its post
@@ -66,6 +75,7 @@ from onlyfans_addon.scraper_api.base import (
 _CATEGORY_HREF_RE = re.compile(r"^https://jizzy\.org/category/([a-z0-9\-]+)/$")
 _RESERVED_SLUGS = {
     "vip-nude-videos",
+    "nude-cosplay-albums",
     "xxx-videos",
     "onlyfans",
     "onlyfans-leaks",
@@ -219,6 +229,16 @@ class JizzyScraper(DirectScraper):
                 logger.debug(f"{self.key}: no post page for {slug}: {exc}")
                 continue
 
+            # The archive's `entry-title` links include a "more posts" grid
+            # of unrelated recent posts below the category's own, in the SAME
+            # card markup. Measured 2026-10-26: Anissa Kate's archive had one
+            # post of hers and ten of other people's, and their videos were
+            # being served as hers. A post belongs to the performer only if
+            # its own article is filed in their category.
+            if not _in_category(post, handle):
+                logger.debug(f"{self.key}: {slug} is not filed under {handle}, skipping")
+                continue
+
             title = _title(post) or _display(handle)
             images = _IMAGE_SRC_RE.findall(post)
             thumbnail = images[0] if images else None
@@ -252,6 +272,21 @@ def _slugify(text: str) -> str:
 
 def _display(handle: str) -> str:
     return " ".join(part.capitalize() for part in handle.split("-"))
+
+
+def _in_category(page: str, handle: str) -> bool:
+    """Whether a post page's own article is filed under category `handle`.
+
+    WordPress puts `category-<slug>` on the post's `<article>`; the first
+    article on a single-post page is the post itself, the rest are the
+    related-posts grid.
+    """
+
+    tree = lxml_html.fromstring(page)
+    articles = tree.xpath("//article/@class")
+    if not articles:
+        return False
+    return f"category-{handle}" in articles[0].split()
 
 
 def _title(page: str) -> str | None:
