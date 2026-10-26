@@ -163,3 +163,6 @@ export async function saveLayout(rails) {
         return false;
     }
 }
+
+/** The installed scrapers, with the version each is running. */
+export const listScrapers = () => get("/plugins");

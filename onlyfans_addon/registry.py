@@ -15,14 +15,16 @@ recorded against its filename and skipped, so it shows up in the tab as a
 broken plugin rather than as an absence.
 """
 
+import hashlib
 from dataclasses import dataclass
+from datetime import datetime, timezone
+from pathlib import Path
 
 from loguru import logger
 
 from onlyfans_addon.scraper_api.base import DirectScraper
 from onlyfans_addon.scraper_api.plugins import discover_plugins
 from onlyfans_addon.config import plugin_dir
-from onlyfans_addon.config import settings as addon_settings
 
 
 @dataclass(slots=True)
@@ -32,21 +34,54 @@ class ScraperInfo:
     key: str
     name: str
     base_url: str
-    enabled: bool
     source_file: str
     indexes_accounts: bool
+    #: The scraper's own `version` if it declares one, otherwise the short
+    #: hash of its file. None of the bundled scrapers declares one, and a
+    #: hash is the honest answer to "is the server running the file I
+    #: pushed": it changes exactly when the file does.
+    version: str
+    #: When the file was last written, UTC ISO date-time.
+    updated: str
+
+
+def _path(source_file: str) -> Path | None:
+    path = Path(source_file) if source_file else None
+    return path if path is not None and path.is_file() else None
+
+
+def _version(scraper: DirectScraper, source_file: str) -> str:
+    declared = str(getattr(scraper, "version", "") or "").strip()
+
+    if declared:
+        return declared
+
+    path = _path(source_file)
+
+    if path is None:
+        return ""
+
+    return hashlib.sha1(path.read_bytes()).hexdigest()[:8]
+
+
+def _updated(source_file: str) -> str:
+    path = _path(source_file)
+
+    if path is None:
+        return ""
+
+    return datetime.fromtimestamp(path.stat().st_mtime, timezone.utc).isoformat(
+        timespec="seconds"
+    )
 
 
 class OnlyFansScraperRegistry:
-    """Every scraper in the OnlyFans plugin folder, minus disabled ones."""
+    """Every scraper in the OnlyFans plugin folder. All of them load."""
 
     def __init__(self) -> None:
-        settings = addon_settings()
-
         # The add-on's own bundled folder unless told otherwise, so a fresh
         # install has working scrapers without anyone configuring a path.
         self.plugin_dir = str(plugin_dir())
-        disabled = set(settings.disabled)
 
         discovery = discover_plugins(self.plugin_dir)
 
@@ -56,35 +91,35 @@ class OnlyFansScraperRegistry:
         self.sources: dict[str, str] = {
             key: loaded.source_file for key, loaded in discovery.plugins.items()
         }
-        #: Every scraper found, including disabled ones -- the tab has to list
-        #: a disabled scraper in order to offer re-enabling it.
+        #: Every scraper found.
         self.all: dict[str, DirectScraper] = {
             key: loaded.scraper for key, loaded in discovery.plugins.items()
         }
-        self.services: dict[str, DirectScraper] = {
-            key: scraper for key, scraper in self.all.items() if key not in disabled
-        }
+        #: Same set under the name the service layer reads. There is no
+        #: per-scraper switch: thirty toggles nobody used was the setting
+        #: this replaced, and a site that breaks fails on its own.
+        self.services: dict[str, DirectScraper] = self.all
 
         if self.errors:
             logger.warning(
                 f"OnlyFans scrapers: {len(self.errors)} file(s) failed to load"
             )
         logger.debug(
-            f"OnlyFans scrapers: {len(self.services)} enabled "
-            f"of {len(self.all)} in {self.plugin_dir}"
+            f"OnlyFans scrapers: {len(self.all)} loaded from {self.plugin_dir}"
         )
 
     def describe(self) -> list[ScraperInfo]:
-        """What the settings tab lists, disabled scrapers included."""
+        """What the settings tab lists."""
 
         return [
             ScraperInfo(
                 key=key,
                 name=getattr(scraper, "name", key),
                 base_url=getattr(scraper, "base_url", ""),
-                enabled=key in self.services,
                 source_file=self.sources.get(key, ""),
                 indexes_accounts=getattr(scraper, "indexes_accounts", False),
+                version=_version(scraper, self.sources.get(key, "")),
+                updated=_updated(self.sources.get(key, "")),
             )
             for key, scraper in sorted(self.all.items())
         ]

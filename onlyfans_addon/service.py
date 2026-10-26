@@ -102,21 +102,18 @@ class OnlyFansService:
         from onlyfans_addon.registry import registry
 
         scrapers = registry().services
-        wanted = [key for key in self.settings.sites if sites is None or key in sites]
+        # Every installed scraper that can walk an account index; a new
+        # file in the folder is picked up with no setting to edit.
+        wanted = [
+            key
+            for key, scraper in scrapers.items()
+            if getattr(scraper, "indexes_accounts", False)
+            and (sites is None or key in sites)
+        ]
         touched = 0
 
         for key in wanted:
-            scraper = scrapers.get(key)
-
-            if scraper is None:
-                # Not an error: the sites list is configuration and a plugin
-                # can be disabled from the Plugins tab at any time.
-                logger.debug(f"OnlyFans: no scraper named {key}, skipping")
-                continue
-
-            if not getattr(scraper, "indexes_accounts", False):
-                logger.debug(f"OnlyFans: {key} does not index accounts, skipping")
-                continue
+            scraper = scrapers[key]
 
             # Each site gets its own guard. With five sources, letting one
             # failure end the run would mean a single dead site costs the

@@ -1,6 +1,8 @@
 import { mount as svelteMount, unmount } from "svelte";
 
 import App from "./App.svelte";
+import Settings from "./Settings.svelte";
+import { configure } from "./api.js";
 import "./styles.css";
 
 /*
@@ -32,3 +34,21 @@ export default function mount({ target, path, api, navigate, host }) {
         }
     };
 }
+
+/*
+    The settings tab's section. A slot is mounted with the same shape a page is,
+    minus a path; the page above is unchanged by it.
+*/
+export const slots = {
+    settings({ target, api }) {
+        configure(api);
+        const app = svelteMount(Settings, { target });
+
+        return {
+            update() {},
+            destroy() {
+                unmount(app);
+            }
+        };
+    }
+};

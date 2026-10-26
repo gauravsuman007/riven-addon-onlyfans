@@ -980,3 +980,14 @@ They are a PERFORMANCE property only (tens of thousands of rows here, against
 is silent by design:
 
     SELECT indexname FROM pg_indexes WHERE schemaname = 'onlyfans';
+
+## No scraper list in settings
+
+`settings.sites` and `settings.disabled` are gone. Both were persisted: the
+whole model is saved, so a scraper added by an update was never in the stored
+`sites` and silently never indexed, never got a settings row and never showed
+on a profile. Now every installed scraper with `indexes_accounts` is synced,
+and the settings tab shows a read-only list from `GET /plugins` (name, site,
+version, file date). `version` is the scraper's own attribute if it has one,
+else a hash of its file. Stale `sites`/`disabled` keys in a saved
+settings.json are ignored (pydantic drops unknown fields).

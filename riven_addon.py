@@ -46,6 +46,7 @@ class OnlyFansAddon(Addon):
         # nothing about a library item, so it has nothing to contribute to
         # one's page.
         tv=AddonTv(browse=True),
+        slots=("settings",),
         # Nothing the host can call would tell it this add-on fetches from
         # six archive sites, so it says so. The consequence is not a badge:
         # it is what puts this traffic in the tunnel the VPN settings

@@ -55,8 +55,6 @@ from onlyfans_addon.service import STALE_AFTER
 from onlyfans_addon.registry import registry as of_registry
 from onlyfans_addon.registry import reset as reset_of_registry
 from program.services.vpn import STREAMING, VpnUnavailable, vpn
-from onlyfans_addon.config import plugin_dir, save as save_settings
-from onlyfans_addon.config import settings as addon_settings
 from program.utils import fuzzy
 from program.utils.time import utcnow
 
@@ -1146,7 +1144,7 @@ def sync(sites: Annotated[list[str] | None, Query()] = None) -> SyncStatusRespon
     is the readout.
     """
 
-    configured = list(addon_settings().sites)
+    configured = _indexing_sites()
     wanted = [key for key in (sites or configured) if key in configured]
 
     if not wanted:
@@ -1175,8 +1173,17 @@ def sync(sites: Annotated[list[str] | None, Query()] = None) -> SyncStatusRespon
     return _sync_status()
 
 
+def _indexing_sites() -> list[str]:
+    """Every installed scraper that can walk an account index."""
+
+    return sorted(
+        key
+        for key, scraper in of_registry().services.items()
+        if getattr(scraper, "indexes_accounts", False)
+    )
+
+
 def _sync_status() -> SyncStatusResponse:
-    settings = addon_settings()
     installed = of_registry().services
 
     with db_session() as session:
@@ -1200,7 +1207,7 @@ def _sync_status() -> SyncStatusResponse:
 
         rows: list[SyncRunResponse] = []
 
-        for site in settings.sites:
+        for site in _indexing_sites():
             run = runs.get(site)
             scraper = installed.get(site)
             available = scraper is not None and getattr(
@@ -1529,9 +1536,10 @@ class ScraperInfoResponse(BaseModel):
     key: str
     name: str
     base_url: str
-    enabled: bool
     source_file: str
     indexes_accounts: bool
+    version: str
+    updated: str
 
 
 class PluginsResponse(BaseModel):
@@ -1568,7 +1576,7 @@ def _plugins_response() -> PluginsResponse:
 
 @router.get("/plugins", operation_id="onlyfans_plugins")
 def plugins() -> PluginsResponse:
-    """Every scraper in the OnlyFans folder, disabled ones included."""
+    """Every scraper in the OnlyFans folder, with its version."""
 
     return _plugins_response()
 
@@ -1578,30 +1586,6 @@ def rescan() -> PluginsResponse:
     """Re-read the folder, picking up files added or edited on disk."""
 
     reset_of_registry()
-    return _plugins_response()
-
-
-@router.post("/plugins/{key}/enabled", operation_id="onlyfans_plugin_set_enabled")
-def set_enabled(key: str, enabled: Annotated[bool, Body(embed=True)]) -> PluginsResponse:
-    """Enable or disable one scraper.
-
-    Disabling leaves the file in place and records the key, so re-enabling does
-    not mean re-importing -- and so a scraper disabled because a site broke
-    comes back with one click when it is fixed.
-    """
-
-    settings = addon_settings()
-    disabled = set(settings.disabled)
-
-    if enabled:
-        disabled.discard(key)
-    else:
-        disabled.add(key)
-
-    settings.disabled = sorted(disabled)
-    save_settings(settings)
-    reset_of_registry()
-
     return _plugins_response()
 
 

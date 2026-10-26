@@ -34,28 +34,6 @@ class OnlyFansModel(BaseModel):
             "appearing in the direct-play site list."
         ),
     )
-    disabled: list[str] = Field(
-        default_factory=list,
-        description=(
-            "Scraper keys to skip loading. A disabled scraper stays in the "
-            "folder and can be re-enabled without re-importing it."
-        ),
-    )
-    sites: list[str] = Field(
-        default_factory=lambda: [
-            "ultrathots",
-            "notfans",
-            "porntn",
-            "porn4fans",
-            "hornyfap",
-            "fapello",
-            "viralxxxporn",
-        ],
-        description=(
-            "Scraper keys to index accounts from. A key that is not installed "
-            "or does not index accounts is skipped rather than failing the run."
-        ),
-    )
     max_pages_per_site: int = Field(
         default=400,
         ge=1,

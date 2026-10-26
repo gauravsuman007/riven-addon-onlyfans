@@ -1103,3 +1103,42 @@
 .ofx-drawer-reset {
     margin-right: auto;
 }
+
+/* Settings tab: the installed-scrapers list. */
+.ofx.ofx-settings {
+    padding: 0;
+}
+
+.ofx-settings-title {
+    font-weight: 600;
+    margin: 0 0 0.25rem;
+}
+
+.ofx-settings-note {
+    color: var(--ofx-muted);
+    margin: 0 0 0.75rem;
+}
+
+.ofx-settings-error {
+    color: #f87171;
+    margin: 0 0 0.5rem;
+}
+
+.ofx-settings-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+}
+
+.ofx-settings-table th,
+.ofx-settings-table td {
+    text-align: left;
+    padding: 0.35rem 0.5rem;
+    border-bottom: 1px solid var(--ofx-line);
+    word-break: break-all;
+}
+
+.ofx-settings-table th {
+    color: var(--ofx-muted);
+    font-weight: 500;
+}
