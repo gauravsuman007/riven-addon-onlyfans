@@ -49,7 +49,7 @@
         Object.fromEntries((sync?.sites ?? []).map((row) => [row.site, row]))
     );
 
-    function state(key) {
+    function siteState(key) {
         const row = runs[key];
         if (!row) return "";
         if (row.state === "running") return `running, page ${row.pages}, ${row.accounts_seen} seen`;
@@ -104,7 +104,7 @@
                     <td>{scraper.base_url}</td>
                     <td><code>{scraper.version}</code></td>
                     <td>{day(scraper.updated)}</td>
-                    <td>{scraper.indexes_accounts ? state(scraper.key) : ""}</td>
+                    <td>{scraper.indexes_accounts ? siteState(scraper.key) : ""}</td>
                     <td>
                         {#if scraper.indexes_accounts}
                             <button

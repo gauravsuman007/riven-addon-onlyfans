@@ -128,7 +128,8 @@ globalThis.fetch = async (url) => {
     };
 };
 
-const mount = (await import(process.argv[2])).default;
+const bundle = await import(process.argv[2]);
+const mount = bundle.default;
 const target = dom.window.document.getElementById("root");
 /*
     The host bridge, captured rather than stubbed away.
@@ -334,3 +335,17 @@ console.log(
 
 handle.destroy();
 console.log("after destroy, empty:", target.innerHTML.trim() === "");
+
+/*
+    The settings slot. The host swallows any error a slot throws and renders no
+    section, so a bundle whose slot dies on mount looks exactly like an add-on
+    that never declared one -- which is how a variable named `state` (making
+    `$state` read as a store subscription) shipped invisible.
+*/
+const slotTarget = document.createElement("div");
+document.body.append(slotTarget);
+const slotHandle = bundle.slots.settings({ target: slotTarget, api: "/api/v1/x/onlyfans", props: {} });
+await new Promise((r) => setTimeout(r, 50));
+console.log("settings slot renders:", (slotTarget.textContent || "").includes("Installed scrapers"));
+slotHandle.destroy();
+process.exit(0);
