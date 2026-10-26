@@ -199,6 +199,72 @@ For galleries, also check how many images a *signed-out* request really gets,
 against the count the gallery advertises. That gap is how the image feature
 turned out to be much thinner than the album listings suggest.
 
+### Rejected candidates (2026-10-26 pass over theporndude's OnlyFans category)
+
+Shipped from this pass: `thothub.to`, `leakgallery.com`, `hornyfans.to`,
+`leak.xxx` (see their own docstrings). Everything below was evaluated and
+rejected, with the specific evidence, so it is not re-walked from scratch:
+
+- **A free-text tube search is not a performer index.** `erothots.is` has no
+  working `/models/`, `/pornstar/` or `/pornstars/` — all three 302 to the
+  homepage or to a different domain (`erothots.co`, itself a live-cam
+  affiliate directory under `/girls/<category>/`, not an OnlyFans archive).
+  Its own `/search/<query>/` redirects to `/videos/<query>` and answers with
+  videos whose *titles* matched the text, the same "search can't enumerate
+  people" shape `fapello.py`'s docstring describes — except this site has no
+  people index to fall back on at all.
+- **SimpCity is a forum** (per this task's own standing instruction) **and its
+  given domain doesn't currently resolve.** `simpcity.su` is NXDOMAIN against
+  a public resolver (Cloudflare DoH), not merely ISP-blocked — consistent with
+  third-party reports that the forum rotates domains to dodge takedowns. Not
+  worth chasing a moving domain for a forum that was already out of scope.
+- **`onlyfaps.com` and `fapfolder.com` are dead domains repurposed to a
+  cam-affiliate directory.** Both resolve to the same IP and both redirect to
+  `erothot.co`, a live-cam aggregator (`/girls/cheap-privates`,
+  `/girls/cam2cam`), not an OnlyFans archive.
+- **`teenager365.com` is a mirror, not a new site.** It redirects straight to
+  `hornyfap.tv`, an alt-TLD of the already-shipped `hornyfap.com` — same
+  catalogue, per this file's own "never a mirror" rule.
+- **Dead/unreachable, checked 2026-10-26:** `ultrahqporn.com` (DNS resolves,
+  TCP connect refused outright, plain and via `curl_cffi`), `simpshub.com` and
+  `fansteek.com` (DNS resolves to Cloudflare, every request 522s — Cloudflare
+  reports the origin itself as unreachable), `coomerfans.com` (503 on every
+  path), `fapdungeon.com` and `slutvids.com` (521 on every path). `jizzy.tv`,
+  `onlyjerk.com`, `tittytube.net`, `vippussy.net` are NXDOMAIN against public
+  DoH — no domain was given for these four in the task brief, so this is "the
+  guessed domain is wrong or gone," not a verdict on the site by that name.
+  `pornleaks.in` answers 404/0 bytes on every path checked, including its own
+  `/models/`; only `/packs.php` answers anything.
+- **A WordPress rewrite fuzzy-matching `/models`, `/pornstar/`, `/girls/` or
+  `/performers/` to one specific blog post is not an index.** These are
+  gossip/aggregator blogs with a tag taxonomy, confirmed by checking that the
+  "hit" URL is a single post's own permalink, not a listing:
+  `realpornclip.com`, `thesauceis.com`, `naughtyblog.org` (now
+  `naughtyblog.st`), `fapptime.com`, `theleaksbay.com`.
+- **Four index-path guesses returning byte-identical content is a single
+  SPA/landing-page fallback, not four real routes.** `borntobefuck.com`,
+  `fapfappy.com`, `baddieschicks.com`, `fapshots.com`, `onlychickshub.com`,
+  `leakporner.com` (redirects every path to `tv.leakporner.com`'s homepage),
+  `celebexposed.com` (same fallback on three of the four, `403` on the
+  fourth).
+- **`nsfw247.com` and `ososedki.com` stayed `403` even under `curl_cffi`
+  Chrome impersonation** on every index path tried — a step past a bare
+  TLS-fingerprint gate. Time-boxed out rather than escalating to a real
+  patched browser or FlareSolverr for a site that was not yet confirmed to
+  have anything worth that effort.
+- **No working index path and no sitemap, on every attempt
+  (`/models/`, `/pornstar/`, `/girls/`, `/performers/`, plus the homepage and
+  `/sitemap.xml` where that differed):** `internetchicks.com`, `dirtyship.com`,
+  `picazor.com`, `wildskirts.com`, `thotslife.com`, `ibradome.com`,
+  `hotscope.tv`, `asstoo.com`, `nudecosplaygirls.com`, `thotflix.com`,
+  `influencersgonewild.com`, `thotchicks.com`, `saucesenpai.com`,
+  `uncut-x.com`, `fastleaks.com`, `baddies.xxx`, `share-nude.com`,
+  `fapelloleaks.com`, `tnapics.com`.
+
+Not evaluated at all this pass, well past a hundred candidates past the ones
+above: see the session's final report for the "not yet evaluated, confirmed
+KVS or confirmed real index" shortlist worth picking up first next time.
+
 ## What you are allowed to do to get a site working
 
 The full catalogue of techniques, recurring gate shapes and dead ends is in

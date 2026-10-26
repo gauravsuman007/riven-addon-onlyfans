@@ -114,6 +114,43 @@ Reading notes for this repo:
   with a made-up desktop profile and a fresh ECDSA key.
 - **Rotating embed domains** and **cookies from the embed's own API**: send
   them on every later call of that handshake.
+- **A site's own structured data can BE the scrape.** `leakgallery.com`
+  (shipped 2026-10-26) is an Angular SPA whose raw server response for every
+  index and profile page carries a full `<script type="application/ld+json">`
+  block -- `CollectionPage`/`ItemList` for a listing, `ProfilePage`/`Person`
+  with a `hasPart` array of `ImageObject`/`VideoObject` for a profile, direct
+  `contentUrl`s, no token. `json.loads` on one `<script>` tag replaced every
+  card selector this file would otherwise need. Worth checking for on any
+  SPA-shaped candidate before concluding it needs a browser: view-source the
+  page (not devtools, which shows the hydrated DOM) and grep for
+  `application/ld+json` before writing off a client-rendered site.
+- **A DDoS-Guard-fronted API can publish its own bypass in the block page.**
+  `coomer.st`'s `/api/v1/*` answered 403 with a `text/plain` body reading
+  "If you want to scrape, use \"Accept: text/css\" header in your requests
+  for now" -- DDoS-Guard's heuristic flags `Accept: application/json` from a
+  script as a bot signature, and the operator worked around their own
+  vendor's filter rather than fight it. Sending `Accept: text/css` on an
+  otherwise ordinary request got real JSON back immediately. Read the body of
+  a 403 before escalating to a heavier bypass -- sometimes the answer is
+  printed on the door.
+- **Two anchors to the same URL on one card is a trap for "read the first
+  match."** `leak.xxx`'s video cards render an `<a href="/video/...">`
+  wrapping the thumbnail (carrying the HD/duration badges) and a *second*
+  `<a href="/video/...">` titled `v-title` inside a sibling `.v-meta` block
+  (carrying the view count and posted-at date) -- neither alone has
+  everything. A scraper that dedupes on the video id and reads fields from
+  "the matching anchor" silently gets the first one in document order and
+  loses whatever only lived on the second. Select the containing card and
+  read fields from the whole card, not from whichever anchor matched first.
+- **A WordPress rewrite can 200 an unrelated single post for a guessed
+  index path.** `/models/`, `/pornstar/`, `/girls/`, `/performers/` all
+  returned `200` on several candidates this pass (`realpornclip.com`,
+  `thesauceis.com`, `fapptime.com`, `theleaksbay.com`, `naughtyblog.org`) --
+  but the response was one specific blog post whose slug happened to start
+  with that word, not a listing. The tell: the "hit" URL in `r.url` after
+  redirects is a long, specific post permalink (often with a numeric post id
+  prefix), not the clean path requested. Check `r.url`, not just the status
+  code, before concluding an index path works.
 
 ## Dead ends: how they looked, so you stop early
 
@@ -146,6 +183,32 @@ Reading notes for this repo:
 - **A short-lived token is a resolver's job, not a reason to reject** a source:
   mint it when someone plays. The window for a `/get_file/` acctoken is short
   but starts at the click, not at index time.
+- **`coomer.st` (checked 2026-10-26): a fully working, documented API, parked
+  only because the media CDN was unreachable from the evaluating sandbox, not
+  confirmed broken.** This is the Kemono/Coomer family (open-source Patreon/
+  Fansly/OnlyFans archive). The DDoS-Guard bypass above (`Accept: text/css`)
+  gets real JSON from:
+  `/api/v1/creators` (~27MB, every creator across every service -- filter
+  `service == "onlyfans"`), `/api/v1/onlyfans/user/<id>/profile`, and
+  `/api/v1/onlyfans/user/<id>/posts` (full post objects: `file` and
+  `attachments` arrays, each `{"name", "path"}`, unwatermarked original
+  filenames -- `belledelphine`'s posts carried both `.jpg` and `.mp4`
+  attachments on the same post, 1000 posts stated on her profile). Media URLs
+  are `https://coomer.st/data<path>`, which 302s to a shard
+  (`n1`-`n4`.coomer.st); thumbnails are `https://coomer.st/thumbnail/data<path>`
+  via `img.coomer.st`, which also serves `/icons/onlyfans/<id>` and
+  `/banners/onlyfans/<id>` directly. **`img.coomer.st` verified serving real
+  bytes (`200 image/jpeg`) from this sandbox for icon, banner and thumbnail
+  paths.** The `n1`-`n4.coomer.st` shards that serve full-resolution originals
+  did not: DNS resolved correctly (e.g. `n3.coomer.st` -> `91.149.227.12`) but
+  a raw TCP connect to port 443 timed out completely, on every shard, with
+  plain `requests` and with `curl_cffi` impersonation alike -- a sandbox
+  egress block, not a site gate, going by `img.coomer.st` working fine on
+  what is presumably different infrastructure. **Before shipping:** retry the
+  `n1`-`n4` shards from the real deployment (or through its VPN-routed
+  session) and confirm one serves a `200`/`206` on an actual `/data/<path>`
+  from a real post's `file`/`attachments` entry. If that resolves, this is
+  close to a same-day ship: the API is already fully mapped above.
 
 Record the working recipe (or the dead end, with what was tried and the date)
 in the scraper's docstring. A source parked as "blocked" is worth retrying when
