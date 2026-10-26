@@ -413,6 +413,190 @@ before; this is the same sandbox-egress read as the first attempt, not a
 new finding. See STRATEGIES.md's dead-ends entry — still needs testing from
 the real deployment before any verdict changes.
 
+### Fourth pass (2026-10-26): the third pass's "not yet evaluated" backlog
+
+Shipped: `nsfw247.to`, `onlyleaks.me`, `hornysimp.com`, `nudostar.com`,
+`jizzy.org`, `fapopedia.net`, `tsthots.com`, `x-tg.tube`, `fig.to`,
+`thots.tv` (see their own docstrings — this brings the total to 32 shipped
+scrapers). Every one of the third pass's 26-site "not yet evaluated"
+backlog was reached this pass; nothing was skipped for lack of turns.
+
+**`hornysimp.com`'s parked LuluStream embed was opened, not re-parked.**
+The `split('|')` packer is the generic, public Dean Edwards p.a.c.k.e.r
+algorithm — `hornysimp.py`'s `_unpack` ports the radix-N token
+substitution directly into Python rather than running the site's own
+code, and was checked byte-exact against Node's own `eval()` on a
+captured sample before being trusted. The unpacked payload is a plain
+`jwplayer(...).setup({sources:[{file:"<signed .m3u8 URL>"}]})` — no
+further crypto. Two embed ids pulled from older posts had themselves
+expired server-side ("File is no longer available"), same `200 text/html`
+non-error shape documented for `coomer.st`'s DDoS-Guard bypass; `resolve`
+checks for that text rather than trusting the embed host's own `200`.
+
+**`onlyleaks.me`/`thots.tv`/`tsthots.com`/`x-tg.tube` are four more KVS
+sites, two different theme generations.** `onlyleaks.me` and `thots.tv`
+share byte-identical markup (`model-infos`/`bio-list`) and both carry
+famous names like `dani-daniels` — checked directly whether that is a
+mirror relationship: it is not, the two sites' catalogues for that same
+name share zero overlapping video titles. `tsthots.com` runs a visibly
+newer theme generation (`uv-model__*` BEM classes) of the same CMS.
+`x-tg.tube` uses yet another route layout (plural `/videos?/`/`/albums?/`
+under `/models/<handle>/videos/`, not the singular per-model page the
+other three use) — the family's five-times-duplicated
+`_license_token`/`_unscramble`/`_kvs_sources` block now exists in nine
+copies across this repo, per the standing "never import another plugin's
+internals" rule.
+
+**A WordPress category/tag taxonomy, walked by its own Yoast sitemap, is
+now a three-time-repeated shape, not a one-off.** `nudostar.com` and
+`jizzy.org` both turned out to be post-per-item leak blogs whose themed
+"directory" page is a decoy (`/models/`'s MAZ addon absent or redirecting
+to a single sticky bio post) while the real, complete performer index is
+a `category-sitemap*.xml`/`post_tag-sitemap*.xml` file nothing in the
+site's own nav links to — the same shape `fapnut.py` already found for
+its own `actors-sitemap*.xml`. `fig.to` sharpened this further: it ships
+a *dedicated* custom-post-type sitemap (`fig_creator-sitemap*.xml`, 38
+files, ~38,000 terms) completely separate from its generic
+`category-sitemap*.xml` — the cleanest version of this shape seen yet,
+with no taxonomy-noise filtering needed at all.
+
+**A themed "/model(s)/" page being a decoy is now the modal failure mode
+for a WordPress candidate, not the exception.** Five of this pass's
+rejections and two of its ships hit this exact trap:
+`hornysimp.com`/`prothots.com`/`onlyleaks.me`'s guessed paths all 200 at
+a single unrelated post, while `transfap.to`'s real `/models/` page
+renders only filter-sort links with the actual roster entirely absent
+from the static response.
+
+**`fapopedia.net` is this pass's one video-free site**, shipped anyway —
+a large (tens of thousands of terms, letter-indexed `/list/<letter>/`,
+confirmed 415 real pages on "a" alone) image-only leak gallery with no
+`<video>` tag or third-party embed anywhere sampled. `list_accounts` caps
+at 5 internal sub-pages per letter (documented, not hidden) rather than
+walking a letter's full depth inside one page call.
+
+**The "kingtube" WordPress tube theme is a file-locker/multi-mirror
+network, confirmed on two independent domains.** `tittytube.com` (parked
+by the third pass as "needs embed unpacking") and `transfap.to` (new this
+pass) share the identical theme (`thumb-block` cards, `?actors=<slug>`
+filter links redirecting to `/model/<slug>/` or `/actor/<slug>/`) and
+both resolve their "play" action to a `(With Ads) Download:` block of
+third-party mirror links (`tezfiles.com`, `voe.sx`, `luluvdo.com`,
+`playmogo.com`) with an *empty* `<div class="video-player">` — no native
+player, no embed to unpack, just a download-link aggregator page. This
+reclassifies `tittytube.com` from "parked lead" to a confirmed instance
+of the file-locker dead end STRATEGIES.md already documents for
+`fans-here.com`/`freefans.tv`'s `tezfiles.com` widget, not a new problem.
+
+**`megadump.net` is a new, specific dead-end shape: a directory that
+states tracking numbers and delivers no media at all, on any page
+checked.** Its own `Person` ld+json states outright "This is an
+aggregator entry, not the creator's own page" and a sampled "post" page
+is a stats card ("Tracked items: 120", "Videos (estimate): 12") with
+zero images, videos or download links of any kind — not a file-locker
+redirect, not an embed, nothing to resolve to. Recognise the
+self-description ("aggregator index... not the creator's official
+platform or storefront") on sight next time rather than following the
+"real post pages exist" signal further.
+
+**`pureleaks.net` is a confirmed mirror of `nudostar.com`, not a
+coincidental catalogue overlap.** Its own re-hosted image filenames carry
+the giveaway verbatim: `Aaliyah_Yasin_nude_leaks_nudostar.com_000.jpg` --
+the source site's own brand baked into the filename it was scraped under.
+Stronger evidence than the usual "same handles" check this file uses
+elsewhere, and the clearest version of it seen so far.
+
+**`fapfolder.club` is a sign-in-gated social platform**, the "FapFolder"
+self-description ("the first social content sharing platform for
+adults") matching, not an archive -- prominent `/signin`/`/signup`,
+content organised into user `/groups/<name>` and `/posts/<id>` rather
+than performer pages. Same out-of-scope shape `goonity.com` was rejected
+for in the third pass.
+
+**`collections.only-nice.com` is the same Nuxt app as the already-rejected
+`only-nice.com`, a different subdomain, same dead end.** `apiHost` in its
+inlined `__NUXT__` config still points at `api.only-nice.com`; every
+plausible collection route guessed (`/collections`, `/models`,
+`/creators`, `/girls`, `/performers`, `/users`) still 404s, and the one
+shipped JS bundle checked is framework boilerplate with no route strings
+in it, same as the parent domain's own rejection already describes.
+
+**`onlyleaksfree.com` re-hosts `fapello.com`'s own content through
+`fapello.space`'s CDN, confirmed by its own schema.org block.** A
+gallery page's `ImageObject.image` states
+`https://cdn.fapello.space/images/models/models_146122.jpg` directly —
+`fapello.space` is fapello's own CDN subdomain, so this is a thin
+wrapper/reskin in front of an already-shipped site's content, not an
+independent archive.
+
+**`adultfans.net` and `onlyjerk.net` are both client-rendered grids with
+no inlined data and no discovered API, time-boxed the same way the third
+pass handled `bitchesgirls.com`/`leakshaven.com`.** `adultfans.net`'s
+dedicated `/onlyfans-models` page ships zero performer links in its raw
+response; `onlyjerk.net`'s `/models/` (and its `?filter=` variants) ship
+only a sidebar tag cloud, with the actual grid populated entirely
+post-hydration.
+
+**Four more Next.js SPA shells join that list, confirmed via their own
+flight data rather than assumed:** `leakshere.com`, `leakedchicks.net`,
+`goonleaks.net` and `pornouzz.com` all carry `self.__next_f.push` chunks
+on their `/models` response, but every chunk checked is page `<head>`
+metadata only — no model listing, no discoverable `/api/` route in the
+static response.
+
+**A missing Next.js flight-data chunk is not itself evidence of an SPA
+shell — check for one before assuming the grep for the other signal
+settles it.** `thots.tv` was initially set aside alongside `megadump.net`
+for carrying no `self.__next_f.push` chunks at all; it turned out to be
+an ordinary server-rendered KVS site (shipped, see above) where that
+probe was simply the wrong one to run. `megadump.net` earned its own
+rejection on a completely different, specific finding (the aggregator-
+stats dead end above), not on the absence of flight data.
+
+**`xxxu.net` is this pass's one genuine "needs a real browser" gap, not
+a skip.** `/models/` itself answers normally and carries real
+`/creator/<id>?p=grid` links, but every creator page tried answered
+Cloudflare's "Just a moment..." interstitial consistently across three
+retries, including under `curl_cffi` Chrome impersonation — a step past
+the bare TLS-fingerprint gate this file's bypass order starts with. The
+index is real; the content needs FlareSolverr or a patched browser this
+sandbox does not have.
+
+**`prothots.com` re-confirmed dead**, same decoy shape as the first
+pass's own rejection: `/model/` (and the rest of the guessed paths)
+answer `200` at a single unrelated post, `/models/` 404s outright.
+
+**Straggler check, done properly this time: pulled theporndude's own
+`ItemList` ld+json off a fresh fetch of the category page (120 ranked
+entries, structured data, no guessing at card markup needed) and matched
+every single one against the 32 shipped scrapers and all four passes'
+rejection sections.** Two outcomes worth recording:
+
+- **`FamousInternetGirls` (ranked #104) is not a 121st site — it is
+  `fig.to` under its other name.** `famousinternetgirls.com` redirects
+  straight to `fig.to`, and `fig.to`'s own video CDN subdomain
+  (`fig3.famousinternetgirls.com`, see `fig.py`'s docstring) is the same
+  brand. Already shipped; theporndude just lists the same site under two
+  different names at two different ranks.
+- **`Fapeza` (ranked #36, `fapeza.com`) is a fapello-clone, almost
+  certainly scraping the same source.** Its post-per-item path shape
+  (`/<slug>/<n>/`, media at `/media/<a>/<b>/<slug>/1000/<slug>_NNNN.jpg`)
+  is `fapello.py`'s own shape with `media` in place of `content`, and the
+  one handle checked (`laara-rose-laararose`, an unusual enough slug to
+  rule out coincidence) exists on both sites with identical image
+  numbering starting at `0001`. Rejected as redundant with the already-
+  shipped `fapello.py`, same reasoning as every other mirror this file
+  rejects, even though the two domains are not byte-identical clones of
+  each other's HTML.
+
+Every other one of the 120 matched a name already in a shipped scraper or
+an existing rejection section (including names that looked new at a
+glance but turned out to be the same site at a drifted domain, e.g.
+"Hot Leak" -> `hotleak.vip`, "TheSaucels" -> `thesauceis.com`, both
+confirmed by reading the actual outbound link on theporndude's own review
+page rather than guessing from the display name). Nothing from the
+original ranked list is unaccounted for as of this pass.
+
 ## What you are allowed to do to get a site working
 
 The full catalogue of techniques, recurring gate shapes and dead ends is in

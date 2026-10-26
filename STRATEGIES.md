@@ -204,6 +204,66 @@ Reading notes for this repo:
   redirects is a long, specific post permalink (often with a numeric post id
   prefix), not the clean path requested. Check `r.url`, not just the status
   code, before concluding an index path works.
+- **A generic `eval(function(p,a,c,k,e,d){...}(...))` packer is a public
+  algorithm, not a secret to reverse-engineer per site.** `hornysimp.py`
+  (2026-10-26) ported the classic Dean Edwards p.a.c.k.e.r decode straight
+  into Python -- for `c` from `count-1` down to `0`, replace every
+  whole-word occurrence of `c`'s base-`radix` representation with
+  `keywords[c]` -- rather than running the site's bundle in Node. Checked
+  byte-exact against Node's own `eval()` on a captured sample first. Once
+  recognised (the `split('|')` call next to a huge literal is unmistakable
+  on sight), every future site using the same packer costs a regex and a
+  ~20-line function, not a research session.
+- **A JWT embedded in a page's own JS can be read without ever verifying
+  the signature, when all you want is a claim inside it.** `tittytube.com`'s
+  "SaucePlayer" embed hands the page a per-provider token shaped like a
+  real JWT (`eyJhbGci...`); its payload segment is plain base64url JSON
+  carrying the real destination URL in a `link` field. `base64.urlsafe_
+  b64decode` on the middle segment (padded to a multiple of 4) reads it
+  directly -- no HMAC check needed, since the goal is reading a value the
+  issuer already put there in the clear, not authenticating as anyone.
+  The `exp` on that particular token was 3 seconds after `iat`, presumably
+  to make the page's own `/api/decrypt` call feel "secure"; irrelevant to
+  a reader that decodes locally and never calls that endpoint at all.
+- **A dedicated custom-post-type sitemap is cleaner than a shared
+  category/tag taxonomy for a Yoast-sitemap walk, when a site has one.**
+  `fig.to` ships `fig_creator-sitemap*.xml` (38 files) as a completely
+  separate family from its own `category-sitemap*.xml` (24 files) --
+  checking a site's full `sitemap_index.xml` for a less generic prefix
+  before settling on `category-`/`post_tag-` is worth the one extra
+  request, since it can save the taxonomy-noise filtering those two
+  always need (`fapnut.py`'s `_ACTOR_HREF_RE`, `nudostar.py`'s
+  `_RESERVED_SLUGS`, `jizzy.py`'s own).
+- **A scraped mirror can leak its source's own brand in the filename it
+  re-hosts.** `pureleaks.net` (2026-10-26) serves images under its own
+  domain, but the filenames themselves are untouched copies of
+  `nudostar.com`'s own naming convention --
+  `Aaliyah_Yasin_nude_leaks_nudostar.com_000.jpg`. Stronger than the usual
+  "same handles on both sites" mirror check (coincidental for a famous
+  name): the source's own domain baked into the byte stream is close to
+  unfalsifiable. Worth checking a sampled image's filename, not just the
+  handle list, whenever two candidates share a suspicious number of
+  performers.
+- **A stat on a page can be a hard-coded constant dressed up as
+  engagement data, and the fastest check is comparing the same field
+  across a few different posts.** `hornysimp.com`'s
+  `VideoObject.interactionStatistic.userInteractionCount` read `1250` on
+  every post sampled across several different performers -- a real
+  per-post counter does not do that. One extra request to a second,
+  unrelated post is usually enough to catch this before a field like this
+  gets shipped as `views`.
+
+- **A commercial clone-script site can share fapello's own path shape and
+  bucket math without sharing a single byte of HTML -- check a specific
+  handle's numbering, not the markup, before ruling a mirror in or out.**
+  `fapeza.com` (2026-10-26) uses `/<slug>/<n>/` posts and
+  `/media/<a>/<b>/<slug>/1000/<slug>_NNNN.jpg` images -- `fapello.py`'s
+  own shape with `media` swapped for `content` -- and an unusual slug
+  checked on both domains carries identical image numbering starting at
+  `0001` on each. The HTML, CSS and domain are all different; the giveaway
+  is that both sites agree on where item #1 of the same account starts
+  counting, which independent operators scraping the same public source
+  by chance would not.
 
 ## Dead ends: how they looked, so you stop early
 
@@ -242,15 +302,41 @@ Reading notes for this repo:
   browser fingerprinting; treat an age-verification gate as the "blocked,
   not bypassed" case this file's own limits section already carves out for
   logins and paywalls.
-- **A classic packed/obfuscated embed (`'...'.split('|')` style) is a
-  parked lead, not a dead end -- just not unpacked yet.** `hornysimp.com`'s
-  video posts carry a real `VideoObject.embedUrl` to a third-party embed
-  (`hrnyvid.xyz`) whose player script is the Dean-Edwards-packer shape:
-  a long pipe-delimited string, `.split('|')`, substituted back into
-  minified identifiers. Recognisable on sight by the `split('|')` call next
-  to a huge literal; worth a follow-up pass with the string substituted
-  back in by hand or run through the site's own code per this file's
-  "running an obfuscated bundle" appendix, not attempted this pass.
+- **A classic packed/obfuscated embed (`'...'.split('|')` style) was a
+  parked lead, not a dead end, and opening it confirmed that.**
+  `hornysimp.com`'s video posts carry a real `VideoObject.embedUrl` to a
+  third-party embed (`hrnyvid.xyz`, running LuluStream) whose player
+  script is the Dean-Edwards-packer shape. Opened 2026-10-26: the packer
+  is a public algorithm (see this file's "Techniques" section, `_unpack`
+  in `hornysimp.py`), and the payload underneath was a plain signed HLS
+  master playlist, no further crypto -- shipped. Recognisable on sight by
+  the `split('|')` call next to a huge literal; the lesson generalises --
+  a packed/obfuscated embed is worth one unpacking attempt before being
+  written off, because the packer itself is rarely the real gate.
+- **The "kingtube" WordPress tube theme is a file-locker/multi-mirror
+  network wearing a native-player skin -- recognise the theme fingerprint
+  and skip the whole family.** `tittytube.com` and `transfap.to`
+  (2026-10-26, confirmed independently, same theme) both show a thumbnail
+  grid using `?actors=<slug>` filter links (`thumb-block` cards) that
+  redirect to `/model/<slug>/` or `/actor/<slug>/`, and both resolve
+  their "play" action to a `(With Ads) Download:` block of third-party
+  mirror links (`tezfiles.com`, `voe.sx`, `luluvdo.com`, `playmogo.com`)
+  sitting beside a `<div class="video-player">` that is *empty* -- no
+  native source, no embed worth unpacking, just a download-link
+  aggregator page. The same "different reverse-engineering project, not
+  a gate on the archive itself" verdict as the DataLife-Engine/tezfiles
+  shape below, on a different theme and a different third-party locker
+  set.
+- **A "tracked items" directory can state real-sounding numbers while
+  delivering zero media on any page -- read its own ld+json before
+  trusting the post pages.** `megadump.net` (2026-10-26) states a
+  `Person.description` reading "This is an aggregator entry, not the
+  creator's own page", and a sampled "post" page is a stats card
+  ("Tracked items: 120", "Videos (estimate): 12") with no image, video or
+  download link of any kind -- not a file-locker redirect, nothing to
+  resolve. The self-description is the fast tell; a candidate with real-
+  looking per-performer stat pages still needs at least one checked for
+  an actual media URL before being trusted.
 - A host that does not resolve at all (NXDOMAIN) or a decommissioned route that
   returns the same landing-page HTML for every id.
 - **A zero-import WASM is a function, not a lock.** `WebAssembly.Module.imports(
@@ -288,11 +374,18 @@ Reading notes for this repo:
   what is presumably different infrastructure. **Retried 2026-10-26, same
   result**: `n1`-`n4.coomer.st` all still time out on a raw `socket.connect`
   from this sandbox. Unchanged finding, not a new data point -- the sandbox
-  itself still can't reach that subnet. **Before shipping:** retry the
-  `n1`-`n4` shards from the real deployment (or through its VPN-routed
-  session) and confirm one serves a `200`/`206` on an actual `/data/<path>`
-  from a real post's `file`/`attachments` entry. If that resolves, this is
-  close to a same-day ship: the API is already fully mapped above.
+  itself still can't reach that subnet. **Retried a third time, same session
+  (2026-10-26):** `n1.coomer.st`/`n3.coomer.st` both still time out on a
+  bare `socket.connect(ip, 443)` with an 8s timeout, while `img.coomer.st`
+  connected in just over 1s in the same run -- three attempts, three
+  identical results, split precisely along the same two IP blocks
+  (`91.149.227.x` for the media shards, a different block entirely for
+  `img.coomer.st`). This is now firm enough to stop re-testing from this
+  sandbox at all. **Before shipping:** retry the `n1`-`n4` shards from the
+  real deployment (or through its VPN-routed session) and confirm one
+  serves a `200`/`206` on an actual `/data/<path>` from a real post's
+  `file`/`attachments` entry. If that resolves, this is close to a
+  same-day ship: the API is already fully mapped above.
 
 Record the working recipe (or the dead end, with what was tried and the date)
 in the scraper's docstring. A source parked as "blocked" is worth retrying when
