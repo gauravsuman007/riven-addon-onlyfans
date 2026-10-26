@@ -50,6 +50,8 @@ from onlyfans_addon.models import (
     OnlyFansSyncRun,
 )
 from onlyfans_addon import feed as feeds
+from onlyfans_addon import feedstore
+from onlyfans_addon.config import settings as addon_settings
 from onlyfans_addon.rails import PAGE as RAIL_PAGE, arranged
 from onlyfans_addon.scraper_api.base import BROWSER_HEADERS
 from onlyfans_addon.service import OnlyFansService, normalise_handle
@@ -261,6 +263,10 @@ _ORDERS = {
     # all" opens the default order instead -- which is the only sensible
     # meaning "all of a random selection" can have.
     "random": lambda q: q.order_by(func.random()),
+    # What the viewer kept, most recently saved first.
+    "saved": lambda q: q.where(OnlyFansAccount.saved.is_(True)).order_by(
+        OnlyFansAccount.saved_at.desc().nulls_last()
+    ),
 }
 
 
@@ -1047,38 +1053,61 @@ def _feed_entry(entry: "feeds.Entry") -> FeedEntryResponse:
     )
 
 
-def merged_feed(handle: str, offset: int, limit: int, kinds: str, refresh: bool = False, deadline: float | None = None) -> FeedResponse:
-    """The feed itself, callable from the television's routes too."""
+def merged_feed(
+    handle: str,
+    offset: int,
+    limit: int,
+    kinds: str,
+    refresh: bool = False,
+    deadline: float | None = None,
+    viewer: bool = True,
+) -> FeedResponse:
+    """The feed itself, callable from the television's routes too.
+
+    `viewer` stamps the account as opened, which is what puts it on the
+    background job's list. Off for anything that is not a person looking.
+    """
 
     with db_session() as session:
         account = _lookup(session, handle)
-        sources = [(source.site, source.site_handle) for source in account.sources]
-        names = feeds.name_words(
-            account.display_name,
-            account.handle,
-            account.of_username,
-            *(site_handle for _, site_handle in sources),
-        )
-        key = account.handle
+        inputs = feedstore.Inputs(account)
+        if viewer and offset == 0:
+            account.viewed_at = utcnow()
+            session.commit()
 
-    wanted = frozenset({"video", "image"}) if kinds == "all" else frozenset({kinds})
+    wanted = feeds.ALL_KINDS if kinds == "all" else frozenset({kinds})
 
-    feed = feeds.get_feed(
-        key,
-        wanted,
-        lambda: feeds.Feed(key, sources, wanted, of_registry().services, names, _account_images),
+    current = feeds.get_feed(
+        inputs.handle,
+        lambda: feedstore.load(inputs, _account_images),
         refresh=refresh,
     )
 
-    with feed.lock:
-        feed.fill(offset + limit, deadline=deadline if deadline is not None else feeds.DEADLINE)
-        page = feed.emitted[offset : offset + limit]
-        return FeedResponse(
+    with current.lock:
+        before = feedstore.progress(current)
+        current.fill(
+            offset + limit,
+            deadline=deadline if deadline is not None else feeds.DEADLINE,
+            kinds=wanted,
+        )
+        shown = current.shown(wanted)
+        page = shown[offset : offset + limit]
+        response = FeedResponse(
             items=[_feed_entry(entry) for entry in page],
             next_offset=offset + len(page),
-            done=feed.done and offset + len(page) >= len(feed.emitted),
-            sources=[FeedSourceResponse(**row) for row in feed.status()],
+            done=current.done and offset + len(page) >= len(shown),
+            sources=[FeedSourceResponse(**row) for row in current.status()],
         )
+        changed = feedstore.progress(current) != before
+        snapshot = feedstore.snapshot(current) if changed else None
+
+    # Saved after the lock is released, so a slow database write never holds
+    # up the next page. Whatever was read is kept: the second open of this
+    # performer is instant whether or not the job ever reaches them.
+    if snapshot is not None:
+        feedstore.save(inputs.account_id, *snapshot, current.built_at or utcnow())
+
+    return response
 
 
 @router.get("/accounts/{handle}/feed", operation_id="get_onlyfans_account_feed")
@@ -1267,6 +1296,9 @@ class SyncStatusResponse(BaseModel):
     #: from the avatar count because most pictures are borrowed from an
     #: archive site, so one number cannot answer both questions.
     accounts_with_profile: int = 0
+    #: Stored feeds: how many exist, how many are within the refresh age, and
+    #: how many performers the background job still has to build or refresh.
+    feeds: dict[str, int] | None = None
 
 
 #: Sites with a walk in flight. A second request for a site already running is
@@ -1336,6 +1368,14 @@ def _indexing_sites() -> list[str]:
     )
 
 
+def _feeds_summary() -> dict[str, int] | None:
+    try:
+        return feedstore.summary()
+    except Exception as exc:
+        logger.debug(f"OnlyFans: stored feed summary failed: {exc}")
+        return None
+
+
 def _sync_status() -> SyncStatusResponse:
     installed = of_registry().services
 
@@ -1403,6 +1443,7 @@ def _sync_status() -> SyncStatusResponse:
         accounts=accounts,
         accounts_with_avatar=with_avatar,
         accounts_with_profile=with_profile,
+        feeds=_feeds_summary(),
     )
 
 
@@ -1839,3 +1880,14 @@ async def import_plugins(
 
     reset_of_registry()
     return ImportResponse(results=results, plugins=_plugins_response())
+
+
+def scheduled_feeds() -> None:
+    """Build or refresh one batch of stored feeds. See `onlyfans_addon/feedstore.py`."""
+
+    if not addon_settings().enabled:
+        return
+    try:
+        feedstore.build_batch(_account_images)
+    except Exception as exc:
+        logger.error(f"OnlyFans stored feeds failed: {exc}")

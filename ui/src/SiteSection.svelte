@@ -105,14 +105,17 @@
 
     const shown = $derived(items.filter((entry) => kinds.has(entry.kind)));
 
+    // See Feed.svelte: a derived, so a change elsewhere in the parent's
+    // account object does not reload this site.
+    const sectionKey = $derived(`${handle}\n${site}`);
+
     $effect(() => {
         /*
             The dependencies, read deliberately and in full. `kinds` is NOT
             among them: the filter hides what is already loaded and must not
             throw the feed away and refetch it -- see `more()`.
         */
-        handle;
-        site;
+        sectionKey;
 
         /*
             EVERYTHING ELSE IS UNTRACKED, AND THAT IS THE WHOLE POINT.

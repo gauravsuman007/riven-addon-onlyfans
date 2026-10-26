@@ -164,6 +164,11 @@ class OnlyFansAccount(Base):
     saved_at: Mapped[datetime | None] = mapped_column(
         sqlalchemy.DateTime(timezone=True), nullable=True
     )
+    # When this account's page was last opened. One of the signals that picks
+    # which feeds the background job keeps warm (see `OnlyFansFeed`).
+    viewed_at: Mapped[datetime | None] = mapped_column(
+        sqlalchemy.DateTime(timezone=True), nullable=True, index=True
+    )
 
     created_at: Mapped[datetime] = mapped_column(
         sqlalchemy.DateTime(timezone=True), default=utcnow
@@ -445,3 +450,37 @@ class OnlyFansSyncRun(Base):
 
     def __repr__(self) -> str:
         return f"<OnlyFansSyncRun {self.site} {self.state} pages={self.pages}>"
+
+
+class OnlyFansFeed(Base):
+    """An account's merged feed, saved so its page opens without reading sites.
+
+    `state` is the whole feed (`onlyfans_addon.feed.to_state`), cursors
+    included, not just the list: a restored feed carries on reading each site
+    from where it stopped when the reader scrolls past the stored part.
+
+    Rebuilt from scratch by the background job rather than topped up. New
+    uploads arrive at the TOP of every site, and inserting there would shift
+    the offsets of anyone paging through it; a rebuild is a new list, swapped
+    in only when nobody is reading the old one.
+    """
+
+    __tablename__ = "OnlyFansFeed"
+
+    account_id: Mapped[int] = mapped_column(
+        sqlalchemy.Integer,
+        sqlalchemy.ForeignKey(f"{SCHEMA}.OnlyFansAccount.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    state: Mapped[dict] = mapped_column(sqlalchemy.JSON)
+    #: Entries emitted, for the settings tab and for choosing what to refresh.
+    entries: Mapped[int] = mapped_column(sqlalchemy.Integer, default=0)
+    #: Every site read to its end.
+    complete: Mapped[bool] = mapped_column(sqlalchemy.Boolean, default=False)
+    #: When the feed was built from scratch -- what "stale" is measured from.
+    #: Saving progress from a reader's scrolling does not move it.
+    built_at: Mapped[datetime] = mapped_column(sqlalchemy.DateTime(timezone=True), index=True)
+    saved_at: Mapped[datetime] = mapped_column(sqlalchemy.DateTime(timezone=True))
+
+    def __repr__(self) -> str:
+        return f"<OnlyFansFeed {self.account_id} entries={self.entries}>"

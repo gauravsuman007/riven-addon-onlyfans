@@ -47,6 +47,9 @@ class Rail:
 
 
 RAILS: tuple[Rail, ...] = (
+    # First, because it is the one row the viewer made. Hides itself until
+    # something is saved, like every rail with nothing to show.
+    Rail("saved", "Saved", "performers you saved"),
     Rail("trending", "Trending", "fastest growing this week"),
     Rail("rising", "Rising", "growing fast from a small base"),
     Rail("popular", "Most popular", "most watched across the archive sites"),

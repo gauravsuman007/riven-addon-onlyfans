@@ -258,6 +258,17 @@ console.log("detail verified badge:", detail.includes("ofx-verified"));
 console.log("detail profile link:", detail.includes("onlyfans.com/demo"));
 console.log("detail stats:", detail.includes("photos") && detail.includes("likes"));
 console.log("detail site button:", detail.includes("hornyfap"));
+
+// Saving: the button is there, says so once pressed, and asks the server.
+const saveButton = [...target.querySelectorAll(".ofx-save")][0];
+console.log("detail has a save button:", saveButton?.textContent.includes("Save"));
+saveButton?.click();
+await new Promise((r) => setTimeout(r, 50));
+console.log(
+    "saving asks the server and shows it:",
+    calls.some((c) => c.endsWith("/accounts/demo/save")) &&
+        target.querySelector(".ofx-save")?.textContent.includes("Saved")
+);
 /*
     "More like this" returns a BARE LIST, not a page -- it is already capped
     and has no more to give -- while every other rail returns `{ items }`. The

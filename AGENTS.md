@@ -1012,5 +1012,15 @@ reasoning; the traps:
   would shift every offset the client already paged through.
 - **`DEADLINE` (4s) is per request, not per site.** Raising it makes every
   page as slow as the slowest archive.
-- **Feeds are in-process memory, 20 min TTL.** A restart empties them; that
-  is a re-read, not a bug.
+- **One feed per performer, all kinds.** The Videos/Photos tabs filter it
+  (`Feed.shown`); they do not build their own.
+- **Stored feeds** (`feedstore.py`, table `OnlyFansFeed`, migration 0006).
+  The whole state is saved, cursors included, so a restored feed resumes
+  reading sites when the reader scrolls past the stored part. The job
+  (`router.scheduled_feeds`) keeps saved, opened-in-30-days and top
+  popular/trending performers fresh, REBUILDING rather than topping up -- new
+  uploads land at the top, and inserting there shifts readers' offsets.
+  `put_feed` will not swap in a rebuild while someone is mid-scroll.
+- **Props are getters over the parent's object.** `handle={account.handle}`
+  made the feed's effect depend on all of `account`, so pressing Save reloaded
+  the feed. Effects key on a `$derived` string instead.

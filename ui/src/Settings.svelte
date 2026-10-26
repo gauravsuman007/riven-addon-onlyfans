@@ -79,6 +79,13 @@
         </button>
     </div>
 
+    {#if sync?.feeds}
+        <p class="ofx-settings-note">
+            Stored feeds: {sync.feeds.stored} ({sync.feeds.fresh} up to date), {sync.feeds.waiting} waiting to be built or refreshed
+            for saved, recently opened, popular and trending performers.
+        </p>
+    {/if}
+
     <p class="ofx-settings-title">Installed scrapers ({scrapers.length})</p>
     <p class="ofx-settings-note">
         Loaded from <code>{status?.plugin_dir ?? "…"}</code>. All of them run; the version is the

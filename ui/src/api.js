@@ -101,10 +101,17 @@ export const videoInfo = (site, videoId) =>
 export const galleryImages = (site, galleryId) =>
     get(`/galleries/${encodeURIComponent(site)}/${encodeURIComponent(galleryId)}`);
 
-export const saveAccount = (handle, saved) =>
-    saved
-        ? post(`/accounts/${encodeURIComponent(handle)}/save`)
-        : fetch(`${base}/accounts/${encodeURIComponent(handle)}/save`, { method: "DELETE" });
+/** Save or unsave a performer. True when the server took it. */
+export async function saveAccount(handle, saved) {
+    try {
+        const response = await fetch(`${base}/accounts/${encodeURIComponent(handle)}/save`, {
+            method: saved ? "POST" : "DELETE"
+        });
+        return response.ok;
+    } catch {
+        return false;
+    }
+}
 
 /*
     Images and video are addressed by position and id, never by URL. The real

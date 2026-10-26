@@ -93,9 +93,17 @@
 
     let generation = 0;
 
+    /*
+        A derived, not the props read directly. A prop passed as
+        `handle={account.handle}` is a getter over the parent's whole
+        `account`, so an effect reading it re-runs whenever ANY field of the
+        account changes -- pressing Save reloaded the feed from the top. A
+        derived compares its value and stays quiet when it is the same string.
+    */
+    const feedKey = $derived(`${handle}\n${kind}`);
+
     $effect(() => {
-        handle;
-        kind;
+        feedKey;
         // Untracked for the same reason as SiteSection: `more()` reads the
         // state this resets, and tracking it would loop silently.
         untrack(() => {

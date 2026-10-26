@@ -51,6 +51,45 @@ class OnlyFansModel(BaseModel):
             "rather than failing."
         ),
     )
+    feed_interval: int = Field(
+        default=60 * 30,
+        ge=300,
+        description=(
+            "How often to build stored feeds in the background, in seconds. "
+            "Feeds are kept for saved performers, ones opened in the last 30 "
+            "days, and the top of the popular and trending lists, so their "
+            "pages open without waiting on twenty archive sites."
+        ),
+    )
+    feed_batch_size: int = Field(
+        default=20,
+        ge=1,
+        le=500,
+        description=(
+            "Feeds to build per run, stalest first. Each reads every site the "
+            "performer is on a page or two deep, so this is paced by the "
+            "sites' rate limits, not by the server."
+        ),
+    )
+    feed_max_age_hours: int = Field(
+        default=24,
+        ge=1,
+        le=24 * 14,
+        description=(
+            "Rebuild a stored feed once it is this old, so new uploads appear. "
+            "A page opened on an older one rebuilds it live instead."
+        ),
+    )
+    feed_top: int = Field(
+        default=500,
+        ge=0,
+        le=5000,
+        description=(
+            "How many of the most popular and of the trending performers to "
+            "keep feeds for, on top of saved and recently opened ones. 0 "
+            "keeps only those two."
+        ),
+    )
     sync_day: str = Field(
         default="sun",
         description=(

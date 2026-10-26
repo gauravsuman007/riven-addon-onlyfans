@@ -1183,3 +1183,7 @@
 .ofx-feed-sentinel {
     height: 1px;
 }
+
+.ofx-save {
+    margin: 0.25rem 0 0.5rem;
+}

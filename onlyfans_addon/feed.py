@@ -74,6 +74,14 @@ MAX_FEEDS = 64
 #: forever by a reader who scrolls forever.
 MAX_PAGES = 60
 
+#: The tabs on the account page. Galleries and loose photos are both "image".
+ALL_KINDS = frozenset({"video", "image"})
+
+
+def _tab(kind: str) -> str:
+    return "video" if kind == "video" else "image"
+
+
 _pool = ThreadPoolExecutor(max_workers=16, thread_name_prefix="onlyfans-feed")
 
 #: One lock per site. Scrapers pace themselves with `_wait_turn`, which is not
@@ -331,7 +339,6 @@ class Feed:
         self,
         handle: str,
         sources: list[tuple[str, str]],
-        kinds: frozenset[str],
         scrapers: dict,
         names: frozenset[str],
         fetch_images: Callable[[str, str, int], list],
@@ -342,6 +349,9 @@ class Feed:
         self.fetch_images = fetch_images
         self.lock = threading.Lock()
         self.touched = time.monotonic()
+        #: Wall-clock time the merge was started from scratch. Set by the
+        #: store; restoring a feed keeps the original, so "stale" means stale.
+        self.built_at = None
         self.entries: list[Entry] = []
         self.emitted: list[Entry] = []
         self._dated_credit = 0.0
@@ -352,10 +362,11 @@ class Feed:
             scraper = scrapers.get(site)
             if scraper is None:
                 continue
+            # Every kind, always. The Videos and Photos tabs filter one feed
+            # rather than each building their own: one feed per performer is
+            # what makes it affordable to build them in the background.
             for kind in ("video", "gallery", "photo"):
-                wanted = "video" if kind == "video" else "image"
-                if wanted in kinds:
-                    self.streams.append(Stream(site=site, site_handle=site_handle, kind=kind))
+                self.streams.append(Stream(site=site, site_handle=site_handle, kind=kind))
 
     # -- fetching --
 
@@ -558,8 +569,15 @@ class Feed:
 
     # -- the one public call --
 
-    def fill(self, wanted: int, deadline: float = DEADLINE) -> None:
-        """Read sites until `wanted` entries are ready, or the deadline passes."""
+    def shown(self, kinds: frozenset[str] = ALL_KINDS) -> list[Entry]:
+        """The emitted entries a tab shows, in feed order."""
+
+        if kinds == ALL_KINDS:
+            return self.emitted
+        return [e for e in self.emitted if _tab(e.kind) in kinds]
+
+    def fill(self, wanted: int, deadline: float = DEADLINE, kinds: frozenset[str] = ALL_KINDS) -> None:
+        """Read sites until `wanted` entries of `kinds` are ready, or the deadline passes."""
 
         until = time.monotonic() + deadline
         self.touched = time.monotonic()
@@ -570,13 +588,15 @@ class Feed:
                     self._settle(stream)
 
             self._emit(ignore_pending=False)
-            if len(self.emitted) >= wanted:
+            if len(self.shown(kinds)) >= wanted:
                 return
 
             # Ask for the next page of every stream that has nothing waiting
             # to be shown. Streams with buffered entries do not need more yet.
             for stream in self.streams:
                 if not stream.live or stream.pending is not None:
+                    continue
+                if _tab(stream.kind) not in kinds:
                     continue
                 buffered = any(
                     not e.emitted and (stream.site, stream.kind) in e.origins
@@ -656,19 +676,105 @@ def _fold(into: Entry, other: Entry) -> None:
         into.thumbnail = other.thumbnail
 
 
+# --- Persistence ------------------------------------------------------------
+#
+# The WHOLE state is saved, not just the list. A stored list alone could be
+# served, but scrolling past its end would have to start a fresh merge whose
+# order and offsets disagree with what was already shown. With the cursors
+# saved too, a restored feed simply carries on reading each site from where
+# it stopped.
+
+STATE_VERSION = 1
+
+
+def _entry_state(entry: Entry) -> dict:
+    return {
+        "kind": entry.kind, "site": entry.site, "id": entry.id, "title": entry.title,
+        "thumbnail": entry.thumbnail, "duration": entry.duration, "resolution": entry.resolution,
+        "posted_label": entry.posted_label, "ts": entry.ts, "ts_source": entry.ts_source,
+        "description": entry.description, "has_text": entry.has_text, "page": entry.page,
+        "index": entry.index, "image_count": entry.image_count, "tokens": sorted(entry.tokens),
+        "copies": [[c.site, c.id, c.duration, c.resolution, c.has_text] for c in entry.copies],
+        "emitted": entry.emitted, "seq": entry.seq, "undated": entry.undated,
+        "origins": [list(o) for o in entry.origins], "late": entry.late,
+    }
+
+
+def _entry_from(state: dict) -> Entry:
+    return Entry(
+        kind=state["kind"], site=state["site"], id=state["id"], title=state["title"],
+        thumbnail=state["thumbnail"], duration=state["duration"], resolution=state["resolution"],
+        posted_label=state["posted_label"], ts=state["ts"], ts_source=state["ts_source"],
+        description=state["description"], has_text=state["has_text"], page=state["page"],
+        index=state["index"], image_count=state["image_count"], tokens=frozenset(state["tokens"]),
+        copies=[Copy(*c) for c in state["copies"]], emitted=state["emitted"], seq=state["seq"],
+        undated=state["undated"], origins=[tuple(o) for o in state["origins"]], late=state["late"],
+    )
+
+
+def to_state(feed: "Feed") -> dict:
+    """Everything needed to resume `feed` in another process. Call under its lock."""
+
+    index = {id(entry): position for position, entry in enumerate(feed.entries)}
+    streams = []
+    for stream in feed.streams:
+        streams.append({
+            "site": stream.site, "site_handle": stream.site_handle, "kind": stream.kind,
+            # A page still in flight is not read: resume asks for it again.
+            "page": stream.page - (1 if stream.pending is not None else 0),
+            "exhausted": stream.exhausted, "error": stream.error, "seen": sorted(stream.seen),
+            "frontier": stream.frontier, "dated": stream.dated, "last_ts": stream.last_ts,
+            "count": stream.count,
+        })
+    return {
+        "version": STATE_VERSION,
+        "entries": [_entry_state(entry) for entry in feed.entries],
+        "emitted": [index[id(entry)] for entry in feed.emitted],
+        "streams": streams,
+        "dated_credit": feed._dated_credit,
+        "oldest_shown": feed._oldest_shown,
+    }
+
+
+def from_state(
+    state: dict,
+    handle: str,
+    scrapers: dict,
+    names: frozenset[str],
+    fetch_images: Callable[[str, str, int], list],
+) -> "Feed | None":
+    """A feed resumed from `to_state`, or None if the state is unusable."""
+
+    if state.get("version") != STATE_VERSION:
+        return None
+
+    feed = Feed(handle, [], scrapers, names, fetch_images)
+    feed.entries = [_entry_from(entry) for entry in state["entries"]]
+    feed.emitted = [feed.entries[position] for position in state["emitted"]]
+    feed._dated_credit = state["dated_credit"]
+    feed._oldest_shown = state["oldest_shown"]
+    for row in state["streams"]:
+        if row["site"] not in scrapers:
+            # Uninstalled since: its entries stay, it is just never read again.
+            continue
+        feed.streams.append(Stream(
+            site=row["site"], site_handle=row["site_handle"], kind=row["kind"], page=row["page"],
+            exhausted=row["exhausted"], error=row["error"], seen=set(row["seen"]),
+            frontier=row["frontier"], dated=row["dated"], last_ts=row["last_ts"], count=row["count"],
+        ))
+    return feed
+
+
 # --- The cache --------------------------------------------------------------
 
-_feeds: "OrderedDict[tuple[str, frozenset[str]], Feed]" = OrderedDict()
+_feeds: "OrderedDict[str, Feed]" = OrderedDict()
 _feeds_lock = threading.Lock()
 
 
-def get_feed(
-    handle: str,
-    kinds: frozenset[str],
-    build: Callable[[], Feed],
-    refresh: bool = False,
-) -> Feed:
-    key = (handle, kinds)
+def get_feed(handle: str, build: Callable[[], Feed], refresh: bool = False) -> Feed:
+    """The live feed for `handle`, built (or restored) by `build` on a miss."""
+
+    key = handle
     now = time.monotonic()
     with _feeds_lock:
         for stale in [k for k, f in _feeds.items() if now - f.touched > TTL]:
@@ -683,4 +789,23 @@ def get_feed(
         return feed
 
 
-__all__ = ["Feed", "get_feed", "parse_posted", "title_tokens", "same_video", "name_words"]
+def put_feed(handle: str, feed: Feed) -> None:
+    """Install a feed built elsewhere, unless a reader is mid-scroll on one.
+
+    Replacing a feed someone is paging through would shift their offsets
+    under them; the fresh one is in the database and will be the one restored
+    after this one goes quiet.
+    """
+
+    with _feeds_lock:
+        current = _feeds.get(handle)
+        if current is not None and time.monotonic() - current.touched < 120:
+            return
+        _feeds[handle] = feed
+        _feeds.move_to_end(handle)
+
+
+__all__ = [
+    "ALL_KINDS", "Feed", "from_state", "get_feed", "name_words", "parse_posted",
+    "put_feed", "same_video", "title_tokens", "to_state",
+]

@@ -3,6 +3,7 @@
         getAccount,
         galleryImages,
         imageUrl,
+        saveAccount,
         similarAccounts,
         streamUrl
     } from "./api.js";
@@ -85,6 +86,20 @@
             ["likes", account?.likes_count]
         ].filter(([, value]) => value != null)
     );
+
+    /*
+        Saving keeps a performer on the landing page's Saved row, and keeps
+        their feed built in the background so the page opens at once.
+    */
+    let saving = $state(false);
+
+    async function toggleSaved() {
+        if (!account || saving) return;
+        saving = true;
+        const next = !account.saved;
+        if (await saveAccount(account.handle, next)) account = { ...account, saved: next };
+        saving = false;
+    }
 
     function toggleSite(site) {
         const next = new Set(opened);
@@ -233,6 +248,15 @@
                     {account.source_count === 1 ? "site" : "sites"}
                 </p>
 
+                <button
+                    class="ofx-btn ofx-save"
+                    class:ofx-on={account.saved}
+                    type="button"
+                    disabled={saving}
+                    aria-pressed={account.saved}
+                    onclick={toggleSaved}>
+                    {account.saved ? "★ Saved" : "☆ Save"}
+                </button>
                 {#if account.bio}
                     <p class="ofx-bio" class:ofx-clamped={!bioOpen}>{account.bio}</p>
                     <button

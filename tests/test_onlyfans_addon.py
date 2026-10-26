@@ -418,7 +418,7 @@ def test_the_merged_feed():
     from dataclasses import dataclass as _dc
     from datetime import datetime as _dt, timedelta as _td, timezone as _tz
 
-    from onlyfans_addon.feed import Feed, name_words, parse_posted, same_video, title_tokens
+    from onlyfans_addon.feed import Feed, from_state, name_words, parse_posted, same_video, title_tokens, to_state
 
     now = _dt(2026, 10, 26, tzinfo=_tz.utc)
     check("ISO date", parse_posted("2026-10-24T17:56:47.000Z", now) == (_dt(2026, 10, 24, 17, 56, 47, tzinfo=_tz.utc).timestamp(), False))
@@ -491,7 +491,7 @@ def test_the_merged_feed():
         "nodate": Site([[V("n1", "Anissa Kate - Hotel Sextape Bravo Alpha", None, 601), V("n2", "Plain clip", None, 90)]]),
         "slow": Site([[V("s1", "Newest of all uploads here", day(1))]], delay=1.5),
     }
-    feed = Feed("anissakate", [(k, "anissa-kate") for k in sites], frozenset({"video"}), sites, names, lambda *a: [])
+    feed = Feed("anissakate", [(k, "anissa-kate") for k in sites], sites, names, lambda *a: [])
     feed.fill(10, deadline=0.5)
     first = [e.id for e in feed.emitted]
     check("the feed answers before a slow site does", "s1" not in first, str(first))
@@ -507,6 +507,27 @@ def test_the_merged_feed():
     feed.fill(20, deadline=2)
     late = [e for e in feed.emitted if e.id == "s1"]
     check("a slow site's entry arrives flagged late", bool(late) and late[0].late)
+
+    # A stored feed resumes exactly where it stopped. Two feeds over the same
+    # sites: one read straight through, one saved after its first page,
+    # restored into a new object (as after a restart), and read on.
+    import json as _json
+
+    deep = {"deep": Site([[V(f"p{p}-{i}", f"Scene {p} {i} words here", day(p * 10 + i)) for i in range(3)] for p in range(4)])}
+    straight = Feed("x", [("deep", "x")], deep, names, lambda *a: [])
+    straight.fill(100, deadline=5)
+    partial = Feed("x", [("deep", "x")], deep, names, lambda *a: [])
+    partial.fill(2, deadline=5)
+    stored = _json.loads(_json.dumps(to_state(partial)))
+    resumed = from_state(stored, "x", deep, names, lambda *a: [])
+    check("a stored feed restores", resumed is not None and [e.id for e in resumed.emitted] == [e.id for e in partial.emitted])
+    resumed.fill(100, deadline=5)
+    check(
+        "a restored feed carries on as if never stored",
+        [e.id for e in resumed.emitted] == [e.id for e in straight.emitted],
+        f"{[e.id for e in resumed.emitted]} vs {[e.id for e in straight.emitted]}",
+    )
+    check("tabs filter one feed", all(e.kind == "video" for e in straight.shown(frozenset({"video"}))))
 
 
 test_every_scraper_request_goes_through_the_routed_session()

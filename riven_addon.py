@@ -21,7 +21,7 @@ from pathlib import Path
 
 from program.addons import Addon, AddonManifest, AddonNav, AddonRail, AddonTv
 
-from onlyfans_addon import config, feed, profile, registry, router, service, tv
+from onlyfans_addon import config, feed, feedstore, profile, registry, router, service, tv
 from onlyfans_addon.models import metadata as onlyfans_metadata
 from onlyfans_addon.rails import RAILS
 from onlyfans_addon.settings import OnlyFansModel
@@ -141,6 +141,9 @@ class OnlyFansAddon(Addon):
             # unconditionally and gated inside `search_batch`, for the same
             # reason the ranking pass is.
             service.scheduled_search: {"interval": settings.search_interval},
+            # Stored feeds for the performers likely to be opened, so their
+            # pages do not wait on twenty archive sites. See feedstore.py.
+            router.scheduled_feeds: {"interval": settings.feed_interval},
         }
 
     def start(self) -> None:
