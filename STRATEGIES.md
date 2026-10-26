@@ -142,6 +142,59 @@ Reading notes for this repo:
   "the matching anchor" silently gets the first one in document order and
   loses whatever only lived on the second. Select the containing card and
   read fields from the whole card, not from whichever anchor matched first.
+- **A third-party HLS backend can hide behind an iframe-of-an-iframe, and
+  still need no auth at all.** `hornyleak.tv` (2026-10-26): a video's own
+  page embeds `/embed/<id>/` on the same domain, which embeds a
+  *different* domain's `/embed/<token>` ("BEpeak HLS Stream System"),
+  whose inline script names a real, server-decoded HLS master playlist.
+  Every hop -- including the final MPEG-TS segment -- answered with a bare
+  `requests.get`, no cookie, no Referer. `leakgrl.com` turned out to front
+  the exact same backend directly from its own domain (a Laravel-signed
+  `/s/p/<id>?expires=...&signature=...` URL), with a completely different,
+  non-overlapping performer catalogue -- a shared *media* network across
+  otherwise-unrelated storefronts, the same relationship the KVS family
+  already has with each other.
+- **The Accept header as a bot-detection heuristic is not a one-off.**
+  `hornyleak.tv`'s `hdplayer.gives/list/...` endpoint 404s this family's
+  default `BROWSER_HEADERS` Accept value
+  (`text/html,application/xhtml+xml,...`) and serves the real playlist to
+  a plain `*/*` -- the same shape as `coomer.st`'s documented
+  `Accept: text/css` bypass below. Two independent sites doing this is
+  enough to make "try overriding Accept to `*/*` on a 404" a standing
+  move, not a one-off curiosity, whenever a response smells like it is
+  being refused for *looking* automated rather than for anything about the
+  request itself.
+- **A WordPress plugin can put the real `<video>` tag inside a base64 query
+  string, decodable without ever requesting the iframe it's destined for.**
+  `fapnut.net`'s "clean-tube-player" plugin renders
+  `<iframe src=".../player-x.php?q=<base64>">`; the `q` value is plain
+  base64 of a URL-encoded query string (`post_id=...&type=video&tag=<the
+  real HTML>`), and the decoded `tag` *is* the final `<video><source>`
+  markup. Decode locally with `base64.b64decode` + `urllib.parse.parse_qs`
+  and the iframe itself never needs to be fetched.
+- **A post's own `VideoObject` schema.org block is worth checking before
+  any HTML-parsing route, on any WordPress candidate.** Three unrelated
+  deployments this pass (`amateurdoporn.com`, `gotanynudes.com`, and
+  `leakgallery.com` from the pass before) all put the real, direct
+  `contentUrl` in a `<script type="application/ld+json">` `VideoObject`
+  node -- sometimes top-level, sometimes nested in an `@graph` array next
+  to `Article`/`Person`/`BreadcrumbList` siblings. Check both shapes before
+  concluding a post has no structured data.
+- **A Yoast taxonomy sitemap can be the only real performer index a site
+  has, when the site's own "directory" page is a decoy.** `fapnut.net`'s
+  visible `/pornstars/` page is actually a filtered *video* grid with no
+  performer cards at all; the complete, real enumeration
+  (`/actors-sitemap.xml` through `-sitemap5.xml`, ~4,500 pages) only showed
+  up by checking `/sitemap.xml`'s own sitemap-of-sitemaps. Worth checking
+  on any WordPress candidate whose visible directory looks thin: the
+  taxonomy term count in the Yoast sitemap is the ground truth, not the
+  themed page.
+- **A declared charset can be wrong, and `requests.text` trusts it anyway.**
+  `gotanynudes.com` declares `ISO-8859-1` in a response header while
+  serving UTF-8 bytes (`response.apparent_encoding` correctly says so); an
+  em dash in a title decoded as `â€”` was the visual tell. Decode via
+  `response.content.decode("utf-8")` explicitly rather than `.text` on any
+  site where accented characters or punctuation look mangled.
 - **A WordPress rewrite can 200 an unrelated single post for a guessed
   index path.** `/models/`, `/pornstar/`, `/girls/`, `/performers/` all
   returned `200` on several candidates this pass (`realpornclip.com`,
@@ -170,6 +223,34 @@ Reading notes for this repo:
   the index is complete. Raise (or set a flag) on a 403 mid-walk.
 - **A bait front-end**: pages that open "install this extension to unlock"
   popups or redirect to an installer. Malvertising, not a source. Skip.
+- **A file-locker-backed archive is a different reverse-engineering project,
+  not a gate on the archive itself.** `fans-here.com`/`freefans.tv`
+  (DataLife Engine, "videok2s" theme, recognisable by its nav: "Home
+  (Categories) / Videos / Tags / Models / Request Board") route every
+  single post through a `k2s.cc` preview widget pointing at a
+  `tezfiles.com` file page -- itself a JS-only React SPA that would need
+  its own separate reverse-engineering of a third company's download flow
+  (typically timer/captcha-gated) before a byte could be fetched. Recognise
+  the theme/nav fingerprint and park both sites together rather than
+  evaluating the same locker twice.
+- **A real age-verification wall is not a bot-detection challenge, and this
+  repo's bypass policy does not cover it.** `pimpbunny.com` serves "Age
+  verification is required in your region" with zero model/video links in
+  the raw response -- a client-side identity-verification product
+  (Persona/Yoti-shaped), categorically different from a Cloudflare/
+  Turnstile check. The bypass order in this file is about bot detection and
+  browser fingerprinting; treat an age-verification gate as the "blocked,
+  not bypassed" case this file's own limits section already carves out for
+  logins and paywalls.
+- **A classic packed/obfuscated embed (`'...'.split('|')` style) is a
+  parked lead, not a dead end -- just not unpacked yet.** `hornysimp.com`'s
+  video posts carry a real `VideoObject.embedUrl` to a third-party embed
+  (`hrnyvid.xyz`) whose player script is the Dean-Edwards-packer shape:
+  a long pipe-delimited string, `.split('|')`, substituted back into
+  minified identifiers. Recognisable on sight by the `split('|')` call next
+  to a huge literal; worth a follow-up pass with the string substituted
+  back in by hand or run through the site's own code per this file's
+  "running an obfuscated bundle" appendix, not attempted this pass.
 - A host that does not resolve at all (NXDOMAIN) or a decommissioned route that
   returns the same landing-page HTML for every id.
 - **A zero-import WASM is a function, not a lock.** `WebAssembly.Module.imports(
@@ -204,7 +285,10 @@ Reading notes for this repo:
   a raw TCP connect to port 443 timed out completely, on every shard, with
   plain `requests` and with `curl_cffi` impersonation alike -- a sandbox
   egress block, not a site gate, going by `img.coomer.st` working fine on
-  what is presumably different infrastructure. **Before shipping:** retry the
+  what is presumably different infrastructure. **Retried 2026-10-26, same
+  result**: `n1`-`n4.coomer.st` all still time out on a raw `socket.connect`
+  from this sandbox. Unchanged finding, not a new data point -- the sandbox
+  itself still can't reach that subnet. **Before shipping:** retry the
   `n1`-`n4` shards from the real deployment (or through its VPN-routed
   session) and confirm one serves a `200`/`206` on an actual `/data/<path>`
   from a real post's `file`/`attachments` entry. If that resolves, this is

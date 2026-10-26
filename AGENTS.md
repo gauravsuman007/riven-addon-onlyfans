@@ -266,6 +266,153 @@ Not evaluated at all this pass, well past a hundred candidates past the ones
 above: see the session's final report for the "not yet evaluated, confirmed
 KVS or confirmed real index" shortlist worth picking up first next time.
 
+### Third pass (2026-10-26): sheeshfans/hornyleak redo, the 15-site backlog, two not-reached, one parked lead
+
+Shipped: `sheeshfans.com`, `hornyleak.tv`, `leakgrl.com`, `fapnut.net` (=
+`slutvids.net`), `amateurdoporn.com`, `gotanynudes.com`, `findhername.net`
+(see their own docstrings — this brings the total to 22 shipped scrapers).
+
+**`sheeshfans.com` was a stale finding, not a real puzzle.** The previous
+pass's "alinity has only albums, no player block" does not reproduce:
+every alinity video checked now carries a full `kt_player`/`license_code`/
+`video_url` block, and `account_galleries` works the same way as
+`thothub.py` (just singular `/video/`/`/album/<id>/<slug>/` paths instead of
+plural). Ordinary KVS, nothing to resolve.
+
+**`hornyleak.tv` really is not KVS** — confirmed, the earlier `kt_player`
+signal was a CSS class, not a real call. It is three unauthenticated hops to
+a third-party HLS backend ("BEpeak HLS Stream System") behind an
+`Accept`-header gate identical in shape to `coomer.st`'s documented bypass.
+`leakgrl.com` turned out to front the *same* backend directly, with zero
+handle overlap — a shared media network, not a shared catalogue, same as
+every KVS deployment already in this file.
+
+- **PimpBunny (`pimpbunny.com`) is blocked by a real age-verification wall,
+  not a bot filter.** Every index path serves "Age verification is required
+  in your region" with zero model/video links in the raw response — a
+  client-side identity-verification gate (Persona/Yoti-shaped), not a
+  Cloudflare-style browser check. This repo's bypass policy
+  (`curl_cffi`/patched browser/FlareSolverr) is explicitly about bot
+  detection; an age-verification identity service is a different category
+  and was not attempted.
+- **`thotster.com` has almost no real performer pages at all.** `/models`
+  renders the same fixed 6 cards regardless of `?page=` or `/page/N/`, and
+  the site's own `sitemap.xml` confirms why: only 10 `/models/<handle>`
+  URLs exist against 7,600+ `/post/<slug>-<id>` entries. The real content is
+  a flat post-per-item feed with no performer-grouping route — exactly the
+  "tube with no per-performer grouping" shape this file's rule 1
+  disqualifies; deriving an index by bucketing 7,600 post slugs by name
+  prefix is not what `list_accounts` is for.
+- **`fans-here.com` and `freefans.tv` are the same DataLife-Engine
+  "videok2s" theme, and both file their media through a third-party locker.**
+  Real `/xfsearch/porn-stars/<Name>/` performer index, real
+  `<id>-<slug>.html` posts — but every post's player is a `k2s.cc` preview
+  widget pointing at a `tezfiles.com` file page, itself a JS-only SPA that
+  would need its own, separate reverse-engineering of a third company's
+  download flow before a single byte could be fetched. Out of proportion
+  for two candidates when the shape is "file locker" from the first click.
+  Recognise the nav fingerprint ("Home (Categories) / Videos / Tags /
+  Models / Request Board") and the theme name on sight next time.
+- **`leakedmodels.com` has no reliable performer grouping despite looking
+  like one.** `/pornstar/`/`/girls/` render numbered photo-dump posts
+  ("Girls Nude Leaks OnlyFans Photo 13") with no stable performer tie, and
+  the one dedicated directory (`/names/`) lists only 8 entries with no
+  pagination found. A sampled "named" page (`/jade-harris/44/`) carried no
+  actual photo either — flags, nav and an ad iframe, no `<img>` of the
+  stated subject anywhere in the response.
+- **`bitchesgirls.com`, `leakshaven.com` and `only-nice.com` are SPA shells
+  with no inlined data and no discovered API, time-boxed rather than
+  chased with a real browser.** `bitchesgirls.com`: hashed-CSS-module
+  markup, a single `gtag.js` script reference, no bundle, no
+  `__NEXT_DATA__`/flight data of any kind in the response. `leakshaven.com`:
+  Next.js app-router with zero `self.__next_f.push` calls on `/models` —
+  the grid is fetched entirely post-hydration. `only-nice.com`: a Nuxt app
+  with a real backend (`api.only-nice.com`, confirmed JSON, Fastify-shaped
+  404s) but every guessed collection route (`/models`, `/creators`,
+  `/girls`, `/search`, `/users`, `/profiles`) 404s and the shipped bundle is
+  framework boilerplate with no route strings in it. All three need a real
+  browser's network log (Playwright), not more guessing.
+- **`goonity.com` is a sign-in-gated album *community*, not a scraped
+  archive.** Its own i18n strings ("No Public Albums Yet", full sign-in/
+  sign-up flows) and a React-Server-Component fetch for `/models` that never
+  lands in the initial HTML (a separate `_rsc` request this file never saw)
+  describe a user-generated-content platform people have to join, the same
+  "out of scope" shape as a forum.
+- **`porndd.com` is a real KVS deployment — a `PornTN.com`-branded one, with
+  an empty model directory.** The homepage genuinely has trending videos
+  (same KVS template as the already-shipped `porntn.com`), but `/models/`
+  states outright "There is no data in this list." Real site, real videos,
+  zero enumerable performers — rule 1's exact failure mode.
+- **`shareanynudes.com` is a real KVS performer roster with zero content
+  anywhere.** `/models/` lists real handles (`belle-delphine`,
+  `alexa-pearl`, ...) and every one of five checked, plus the homepage
+  itself, carries not one `/video(s)?/<id>/` link. A real index over an
+  empty catalogue — rule 2's failure mode this time, not rule 1.
+- **`thotfans.com` has a real performer index and real posts, gated by a
+  Cloudflare managed challenge on its CDN only.** `/models/` is a genuine
+  A-Z grid (`/model/<slug>/`, avatar, "N Media"), and a post's own
+  `<video><source>` names a plain filename on `cdn.thotfans.com` — which
+  answers `403`/`cf-mitigated: challenge` to a bare request and to
+  `curl_cffi` Chrome impersonation alike. The page itself (`thotfans.com`)
+  is not gated, only the CDN subdomain. Worth a FlareSolverr/patched-browser
+  pass specifically against `cdn.thotfans.com`, not the main site.
+- **`teenager365.to` is still a `hornyfap.tv` mirror, just on the new
+  TLD.** The old rejection (`teenager365.com` → `hornyfap.tv`) was for a
+  domain that no longer resolves the same way; re-verified on the domain
+  theporndude's own listing gives today (`.to`), and the handle
+  `woahhannahjo` appears on both this site's own `/models/` listing and
+  `hornyfap.py`'s — the catalogues overlap, confirming the same mirror
+  relationship under the new TLD.
+
+**Drifted domains from the first pass's guesses, now confirmed separately
+dead or out of scope under their real, current domain** (the original
+rejection was for a wrong/NXDOMAIN guess, not a verdict on the site by this
+name — see the first pass's own note): `vip-pussy.com` redirects to
+`vip-kitty.com`, which answers the exact same byte-identical page on every
+index path guessed (the SPA/landing-fallback shape); `herleaks.com` and
+`xfans.st` both answer Cloudflare `526` (invalid origin certificate) on
+every path; `forums.socialmediagirls.com` is a forum, out of scope
+regardless of domain; `pepeleaks.com` fuzzy-matches `/models`/`/pornstar`/
+`/girls` to unrelated single blog posts, the same WordPress-rewrite shape
+already rejected for other sites in this file; `faps.club` (formerly
+guessed as `onlyfaps.com`) redirects `/` to a generic `/feed` and has no
+`/models/`/`/pornstar(s)/` of its own.
+
+**No working index path on every attempt (`/models/`, `/pornstar(s)/`,
+`/girls/`, `/performers/`, plus the homepage):** `lewdstars.com`,
+`xbunker.cc` (also reads as a forum by name/shape), `hotleak.vip`,
+`leakslove.com`, `adultheaven.fun`, `sexyegirls.to`, `thotalert.com`,
+`xx-videos.online`. `models-nudeteen.org` additionally answers no index
+path and was not pursued further regardless given the name. `onlyporn.tube`
+is a tube with no performer grouping at all (rule 1's plain failure mode,
+same as `erothots.is` above). `pornx.tube`'s TCP connection failed outright
+(DNS resolves, no response) from this sandbox.
+
+**Not evaluated this pass — real signal seen but not run to a verdict,
+worth picking up first next time:** `nsfw247.to` (drifted from the
+rejected `nsfw247.com`; `/models/` lists real handles but the one performer
+sampled had no video links — needs sampling more than one before any
+verdict), `hornysimp.com` (real WordPress performer directory at
+`/model/<slug>/`, real posts, but a video's `VideoObject.embedUrl` points
+at a third-party embed, `hrnyvid.xyz`, serving a classic packed/obfuscated
+`'...'.split('|')` player script — not unpacked this pass), `nudostar.com`,
+`onlyleaks.me`, `prothots.com`, `fapopedia.net`, `pureleaks.net`,
+`jizzy.org` (real index at `/models-a-z/`, not `/models/`), `fapeza.com`,
+`onlyjerk.net`, `fapfolder.club`, `adultfans.net`, `tittytube.com`
+(`/pornstars/` specifically, not `/models/`/`/pornstar/`), `x-tg.tube`,
+`transfap.to`, `tsthots.com`, `xxxu.net` (homepage `403`, `/models/` `200` —
+inconsistent, not explained), `collections.only-nice.com` (a different
+subdomain from the rejected `only-nice.com`, not yet checked on its own),
+`megadump.net`, `leakshere.com`, `onlyleaksfree.com`, `thots.tv`,
+`leakedchicks.net`, `goonleaks.net`, `pornouzz.com`, `fig.to`.
+
+**`coomer.st`, retried 2026-10-26: still parked, unchanged.** The
+`n1`-`n4.coomer.st` media shards are still unreachable by raw TCP connect
+from this sandbox (all four timed out) while `img.coomer.st` was reachable
+before; this is the same sandbox-egress read as the first attempt, not a
+new finding. See STRATEGIES.md's dead-ends entry — still needs testing from
+the real deployment before any verdict changes.
+
 ## What you are allowed to do to get a site working
 
 The full catalogue of techniques, recurring gate shapes and dead ends is in
