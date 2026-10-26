@@ -199,6 +199,96 @@ For galleries, also check how many images a *signed-out* request really gets,
 against the count the gallery advertises. That gap is how the image feature
 turned out to be much thinner than the album listings suggest.
 
+## What you are allowed to do to get a site working
+
+The full catalogue of techniques, recurring gate shapes and dead ends is in
+[STRATEGIES.md](STRATEGIES.md); read it before reverse-engineering anything and add to it
+whenever you learn something.
+
+The maintainer's standing policy: **a site that does not hand over its media in
+plain HTML is not a reason to give up, and none of the following needs asking
+first.** Try the cheap routes before the heavy ones, and write down in the file
+what was tried and why.
+
+**Order of attack, cheapest first**
+
+1. Read what the real page does before assuming a gate. Many "browser-only"
+   sites are a JSON API behind a click, or have the media list inlined in the
+   server-rendered page (Next.js flight data `self.__next_f.push([1,"..."])`,
+   an inline `window.x = {...}`, a `data-links` attribute). Log every request
+   and response of the real page, not just `/api/`.
+2. Grep the site's bundle for the endpoint, the key, the base URL. Static keys
+   and API roots are usually literals; re-read them when decryption starts
+   failing (they rotated).
+3. Run the site's code to learn what it does instead of decoding it by hand.
+4. Check that the result is something a player can use: fetch the URL, decode a
+   few seconds. **Never trust a plausible URL**: a site can answer a stale
+   handshake with a looping decoy, or serve a login page as video.
+
+**Cloudflare, Turnstile, Anubis and other bot gates: bypassing is allowed.**
+Use whatever works, in this order of effort:
+
+- `curl_cffi` with a browser `impersonate=` profile (a TLS/HTTP2 fingerprint
+  gate often needs only that).
+- A real browser: Playwright/Patchright/nodriver/undetected-chromedriver, or
+  Camoufox. Stock headless Chromium does NOT clear a managed challenge or
+  Turnstile (it fingerprints CDP and `navigator.webdriver`); a patched build
+  does.
+- [FlareSolverr](https://github.com/FlareSolverr/FlareSolverr)
+  (`docker run -p 8191:8191 ghcr.io/flaresolverr/flaresolverr`; `POST /v1`
+  with `{"cmd":"request.get","url":"...","maxTimeout":60000}`) returns cleared
+  cookies, the User-Agent it solved with, and the body. A shipped plugin MAY
+  call a FlareSolverr the deployment provides (read its URL from the plugin's
+  settings, never hard-code a host); `cf_clearance` is tied to the solving
+  IP and User-Agent, so fetch the media with the same cookies, UA and egress.
+- Solve the gate yourself: proof-of-work, device-attestation endpoints that
+  only *score* a client profile (a made-up desktop profile and a fresh key
+  often passes).
+- A different front or mirror of the same catalogue.
+- Limit: this is about bot detection and browser checks. It is not licence to
+  break into accounts, defeat a paywall with someone else's credentials, or
+  use stolen keys; a source that needs a login the user has not given is
+  blocked, not bypassed.
+
+**Reverse engineering is allowed, including running the site's own code.**
+
+- Download the bundle and run it. In the container that means `node` (or
+  `quickjs`/`py_mini_racer`/`js2py` when Node is not available) via a
+  subprocess, with browser globals stubbed just enough.
+- Shipping a plugin that downloads the site's player code at resolve time and
+  runs it is allowed when no native route exists. Run only the code of the
+  site being scraped, cap the number and size of scripts, give every run a
+  timeout, run in a subprocess, expose no secrets of the app to it. Return
+  empty (never guess) the moment a shape is missing. Treat its output as
+  untrusted: only `http(s)` URLs, verified.
+- Hook `crypto.subtle` (digest, importKey, encrypt/decrypt, exportKey) and
+  log a stack trace: that turns "reverse-engineer a signing scheme" into
+  "read the log".
+- WASM: load the `.wasm` in Node or `wasmtime`, wrap `WebAssembly.instantiate`
+  to dump linear memory around each call. A module with imports into
+  canvas/`navigator` often only feeds an anti-bot check around a pure
+  computation; recover the algorithm and port it.
+- Recurring shapes worth recognising: AES-GCM envelopes with a static key or a
+  key derived from the date/request, custom base64 alphabets, ROT13 plus
+  character shifts, XOR-then-encrypt, seeded keystreams.
+
+**Network blocks and geoblocks: working around them is allowed.** DNS-level
+blocks by the ISP (use DoH), region locks (send the market/country parameter or
+cookie the site's own client sends, or go out through a VPN, SOCKS/HTTP proxy
+or a remote shell in the right country). `self.session` already honours the
+user's VPN setting. When curl returns 200 and Python gets 403 with identical
+headers, suspect the TLS handshake (use `curl_cffi`), not the headers.
+
+**Tokens and IPs.** A signed URL can be bound to the resolving network
+(`asn=`, an IP in the token). Resolve at play time, from the deployment's own
+egress, and test inside the real container
+(`docker exec <riven container> python3 ...`) before calling a source fixed.
+
+**Dead ends are recorded, not repeated.** When an approach fails for a reason
+that is architectural (the media is behind a paywall, a login, DRM), say so in
+the plugin's docstring with the date, so the next attempt starts from there.
+Retry a dead end when the site's bundle changes.
+
 ## The scraper contract is vendored here
 
 `onlyfans_addon/scraper_api/` holds `DirectScraper`, the VPN-routed session,
