@@ -23,6 +23,8 @@ import re
 from collections.abc import Callable
 from datetime import datetime, timedelta
 
+import time
+
 from loguru import logger
 from sqlalchemy import delete, func, select, update
 
@@ -147,7 +149,7 @@ class OnlyFansService:
 
         for page in range(1, self.settings.max_pages_per_site + 1):
             try:
-                accounts = scraper.list_accounts(page)
+                accounts = _with_retries(lambda: scraper.list_accounts(page), key, page)
             except Exception as exc:
                 # THE END OF THE INDEX IS A 404, not an empty page. Four of
                 # the five sites answer the page after the last one with a
@@ -1307,6 +1309,27 @@ def _percentile(sorted_values: list, value) -> float:
 
     rank = min(bisect.bisect_left(sorted_values, value), len(sorted_values) - 1)
     return rank / (len(sorted_values) - 1)
+
+
+#: Waits before each retry of one index page. A deep walk is thousands of
+#: requests over an hour; measured 2026-10-27, findhername dropped one
+#: connection at page 446 of ~3,500 and that single error failed the whole
+#: walk. A site that is really down still fails, about a minute later.
+_PAGE_RETRY_WAITS = (5, 15, 45)
+
+
+def _with_retries(read, key: str, page: int):
+    """`read()`, retried on errors that are not the index's end."""
+
+    for wait in _PAGE_RETRY_WAITS:
+        try:
+            return read()
+        except Exception as exc:
+            if _is_end_of_index(exc):
+                raise
+            logger.debug(f"OnlyFans: {key} page {page} failed ({exc}); retrying in {wait}s")
+            time.sleep(wait)
+    return read()
 
 
 def _is_end_of_index(exc: Exception) -> bool:
