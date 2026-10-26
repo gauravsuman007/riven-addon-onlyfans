@@ -137,11 +137,33 @@ class FigScraper(DirectScraper):
 
         return accounts
 
+    def _creator_page(self, handle: str, suffix: str = ""):
+        """A creator's page, or None when the site did not serve THAT page.
+
+        An unknown creator is answered **302 to the homepage**, not 404, and
+        `_get` follows it: the caller gets a valid 200 holding the site's
+        newest thirty-one posts, which the card parser lifts as that
+        performer's videos. Measured 2026-10-26: a nonsense handle returned 31
+        videos. The final URL is the only tell.
+        """
+
+        url = f"{self.base_url}/creator/{handle}/{suffix}"
+        response = self._get(url)
+
+        if not response.url.rstrip("/").startswith(f"{self.base_url}/creator/{handle}"):
+            logger.debug(f"{self.key}: {handle} is not a creator here (went to {response.url})")
+            return None
+
+        return response
+
     def account_profile(self, handle: str) -> DirectAccount | None:
         try:
-            response = self._get(f"{self.base_url}/creator/{handle}/")
+            response = self._creator_page(handle)
         except Exception as exc:
             logger.debug(f"{self.key}: no creator page for {handle}: {exc}")
+            return None
+
+        if response is None:
             return None
 
         tree = lxml_html.fromstring(response.text)
@@ -169,9 +191,11 @@ class FigScraper(DirectScraper):
     def account_videos(self, handle: str, page: int = 1) -> list[DirectVideo]:
         suffix = f"page/{page}/" if page and page > 1 else ""
         try:
-            response = self._get(f"{self.base_url}/creator/{handle}/{suffix}")
+            response = self._creator_page(handle, suffix)
         except Exception as exc:
             logger.debug(f"{self.key}: no creator page {page} for {handle}: {exc}")
+            return []
+        if response is None:
             return []
         return _videos(response.text, self.base_url, self.key)
 

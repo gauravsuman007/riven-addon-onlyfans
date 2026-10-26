@@ -35,7 +35,7 @@ class OnlyFansModel(BaseModel):
         ),
     )
     max_pages_per_site: int = Field(
-        default=400,
+        default=5000,
         ge=1,
         le=5000,
         description=(
@@ -44,8 +44,11 @@ class OnlyFansModel(BaseModel):
             "when a site 404s the page after its last one or repeats a page, "
             "and a full walk of the deepest site takes about twenty seconds. "
             "Measured 2026-09-12: ultrathots 155 pages, hornyfap 246, "
-            "porn4fans 66, porntn 8, notfans 2. Setting this low silently "
-            "truncates the index rather than failing."
+            "porn4fans 66, porntn 8, notfans 2. Measured 2026-10-26, "
+            "after the scraper batch: findhername ~3,500 pages at 5 "
+            "accounts each, viralxxxporn over 400. The old default of 400 "
+            "silently truncated both. Setting this low truncates the index "
+            "rather than failing."
         ),
     )
     sync_day: str = Field(
