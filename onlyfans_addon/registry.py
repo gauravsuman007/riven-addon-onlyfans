@@ -45,18 +45,19 @@ class ScraperInfo:
     updated: str
 
 
-def _path(source_file: str) -> Path | None:
-    path = Path(source_file) if source_file else None
+def _path(folder: str, source_file: str) -> Path | None:
+    # `source_file` is a bare filename, relative to the plugin folder.
+    path = Path(folder) / source_file if source_file else None
     return path if path is not None and path.is_file() else None
 
 
-def _version(scraper: DirectScraper, source_file: str) -> str:
+def _version(scraper: DirectScraper, folder: str, source_file: str) -> str:
     declared = str(getattr(scraper, "version", "") or "").strip()
 
     if declared:
         return declared
 
-    path = _path(source_file)
+    path = _path(folder, source_file)
 
     if path is None:
         return ""
@@ -64,8 +65,8 @@ def _version(scraper: DirectScraper, source_file: str) -> str:
     return hashlib.sha1(path.read_bytes()).hexdigest()[:8]
 
 
-def _updated(source_file: str) -> str:
-    path = _path(source_file)
+def _updated(folder: str, source_file: str) -> str:
+    path = _path(folder, source_file)
 
     if path is None:
         return ""
@@ -118,8 +119,8 @@ class OnlyFansScraperRegistry:
                 base_url=getattr(scraper, "base_url", ""),
                 source_file=self.sources.get(key, ""),
                 indexes_accounts=getattr(scraper, "indexes_accounts", False),
-                version=_version(scraper, self.sources.get(key, "")),
-                updated=_updated(self.sources.get(key, "")),
+                version=_version(scraper, self.plugin_dir, self.sources.get(key, "")),
+                updated=_updated(self.plugin_dir, self.sources.get(key, "")),
             )
             for key, scraper in sorted(self.all.items())
         ]

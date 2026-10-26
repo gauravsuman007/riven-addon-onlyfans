@@ -72,10 +72,10 @@ from onlyfans_addon.settings import OnlyFansModel  # noqa: E402
 
 _first_key, _first = next(iter(bundled.plugins.items()))
 _source = _first.source_file
-check("a scraper's version is non-empty", _version(_first.scraper, _source) != "")
+check("a scraper's version is non-empty", _version(_first.scraper, str(ROOT / "scrapers"), _source) != "")
 check(
     "the version tracks the file, so a stale server copy is visible",
-    len(_version(_first.scraper, _source)) == 8,
+    len(_version(_first.scraper, str(ROOT / "scrapers"), _source)) == 8,
 )
 check(
     "there is no per-scraper switch or site list to fall out of date",
