@@ -82,6 +82,13 @@ with nobody told.
 }
 ```
 
+### `POST tv/toggle?id=<card id>&name=<switch>&on=<bool>`
+
+Optional. When `tv/detail` answers `"toggle": {"name", "label", "on_label",
+"on"}`, the television draws one button ("Save" / "Saved") and POSTs here to
+flip it; the answer is `{"on": bool}`. The television shows whatever
+`tv/detail` says afterwards, so a refused write simply leaves the state alone.
+
 ### `GET tv/play?id=<card id>`
 
 ```jsonc

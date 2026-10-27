@@ -437,11 +437,36 @@ def tv_detail(
         "lines": lines,
         "choices": choices,
         "sections": sections,
+        # One switch the viewer can flip: keeping this performer on the
+        # landing page's Saved row. `on` is the state now; the television
+        # POSTs `tv/toggle` to change it.
+        "toggle": {
+            "name": "save",
+            "label": "Save",
+            "on_label": "Saved",
+            "on": bool(account.saved),
+        },
         # A cursor, or nothing at the end. The other side draws a "Load more"
         # only when there is one, so a site that answered short does not get
         # a button that fetches the same screen again.
         "more": more,
     }
+
+
+@router.post("/toggle", operation_id="onlyfans_tv_toggle")
+def tv_toggle(
+    id: Annotated[str, Query(min_length=1, max_length=128)],
+    name: Annotated[str, Query(max_length=32)] = "save",
+    on: Annotated[bool, Query()] = True,
+) -> dict[str, Any]:
+    """Flip the one switch ``tv/detail`` offers. Only ``save`` exists."""
+
+    from onlyfans_addon.router import _set_saved
+
+    if name != "save":
+        raise HTTPException(status_code=404, detail="No such switch")
+
+    return {"on": bool(_set_saved(id, on).saved)}
 
 
 @router.get("/play", operation_id="onlyfans_tv_play")
