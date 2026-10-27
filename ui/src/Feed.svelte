@@ -251,11 +251,11 @@
                     <p class="ofx-caption-when">
                         {#if when(entry)}{when(entry)} · {/if}
                         {#if entry.copies.length > 1}
-                            {#each entry.copies as copy (copy.site)}
+                            {#each entry.copies as copy (`${copy.site}:${copy.id}`)}
                                 <button
                                     type="button"
                                     class="ofx-copy"
-                                    class:ofx-on={copy.site === entry.site}
+                                    class:ofx-on={copy.site === entry.site && copy.id === entry.id}
                                     title="Play the {copy.site} copy{copy.duration ? ` (${duration(copy.duration)})` : ''}"
                                     onclick={() => onplay(video(entry, copy))}>{copy.site}</button>
                             {/each}

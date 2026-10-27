@@ -234,27 +234,63 @@ def name_words(*names: str | None) -> frozenset[str]:
     return frozenset(word for word in words if word)
 
 
-def same_video(a: "Entry", b: "Entry") -> bool:
-    """Whether two videos from different sites are one upload."""
+#: Below this length a duration match is weak evidence on its own. Measured
+#: 2026-10-27 against same-site pairs (which the merge never compares, so any
+#: match among them is a coincidence or a repost): 13,469 pairs of clips under
+#: two minutes on one site agree to within a second, most of them on sites
+#: whose titles are generic ("Sierra Cabot OnlyFans Leak 2"). Over fifteen
+#: minutes it was 548 -- and about half of those were reposts.
+SHORT_CLIP = 300
 
-    if a.site == b.site:
-        return False
 
+def _overlap(a: "Entry", b: "Entry") -> float:
+    return len(a.tokens & b.tokens) / len(a.tokens | b.tokens)
+
+
+def _same_title(a: "Entry", b: "Entry") -> bool:
     # Equal distinguishing words, and enough of them to be distinguishing.
     # Three is the floor because "Masturbation" alone matches half a catalogue.
-    if a.tokens and a.tokens == b.tokens and len(a.tokens) >= 3:
+    return bool(a.tokens) and a.tokens == b.tokens and len(a.tokens) >= 3
+
+
+def same_video(a: "Entry", b: "Entry") -> bool:
+    """Whether two videos are one upload.
+
+    A wrong merge HIDES a different video; a missed one shows a duplicate
+    tile. The rules lean accordingly, hardest where coincidences are common.
+    """
+
+    if a.site == b.site:
+        # Sites do repost (thothub carries "Molly Little Pregnant Fuck and
+        # Messy Cum" twice at 1005s), but a site's own list is mostly
+        # distinct scenes, so only the strongest evidence merges within one:
+        # the same distinguishing title AND the same length.
+        return _same_title(a, b) and bool(a.duration and b.duration) and abs(a.duration - b.duration) <= 1
+
+    if _same_title(a, b):
         return True
 
-    if a.duration and b.duration and min(a.duration, b.duration) >= 30:
-        if abs(a.duration - b.duration) <= 2:
-            if not a.tokens or not b.tokens:
-                # One side has no usable title ("Anissa Kate #3653"); the
-                # duration is all there is, and to the second it is strong.
-                return True
-            overlap = len(a.tokens & b.tokens) / len(a.tokens | b.tokens)
-            return overlap >= 0.2
+    if not (a.duration and b.duration):
+        return False
+    shorter = min(a.duration, b.duration)
+    if shorter < 30:
+        return False
 
-    return False
+    if shorter < SHORT_CLIP:
+        # Short clips collide constantly, so the length must agree to the
+        # second AND the titles must say the same thing. A generic title
+        # ("Grace Charis ONLY FANS Video") is no evidence at all here.
+        if abs(a.duration - b.duration) > 1 or not a.tokens or not b.tokens:
+            return False
+        return _overlap(a, b) >= 0.34
+
+    if abs(a.duration - b.duration) > 2:
+        return False
+    if not a.tokens or not b.tokens:
+        # One side has no usable title; for a long video the length to the
+        # second is strong evidence on its own.
+        return True
+    return _overlap(a, b) >= 0.2
 
 
 # --- The merged feed --------------------------------------------------------
@@ -494,8 +530,13 @@ class Feed:
             for existing in self.entries:
                 if existing.kind != "video" or not same_video(existing, entry):
                     continue
-                if any(copy.site == entry.site for copy in existing.copies):
-                    continue
+                # Matched the playing copy, but the entry already holds a copy
+                # from this same site: that is a repost, and needs the
+                # same-site standard of evidence, not the cross-site one.
+                if entry.site != existing.site and any(c.site == entry.site for c in existing.copies):
+                    if not (_same_title(existing, entry) and entry.duration and existing.duration
+                            and abs(entry.duration - existing.duration) <= 1):
+                        continue
                 _fold(existing, entry)
                 return
         self.entries.append(entry)
@@ -806,6 +847,7 @@ def put_feed(handle: str, feed: Feed) -> None:
 
 
 __all__ = [
+    "SHORT_CLIP",
     "ALL_KINDS", "Feed", "from_state", "get_feed", "name_words", "parse_posted",
     "put_feed", "same_video", "title_tokens", "to_state",
 ]

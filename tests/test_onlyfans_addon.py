@@ -434,10 +434,12 @@ def test_the_merged_feed():
         site: str
         title: str
         duration: int | None = None
+        #: The performer whose feed this is: their name is stripped from titles.
+        who: str = "Anissa Kate"
 
         @property
         def tokens(self):
-            return title_tokens(self.title, names)
+            return title_tokens(self.title, name_words(self.who))
 
     check(
         "same title on two sites is one video, whatever the durations",
@@ -450,8 +452,30 @@ def test_the_merged_feed():
                    E("fapnut", "Anissa Kate, Eddie Jay - Rough BBC", 990)),
     )
     check(
-        "two scenes on ONE site are never merged",
-        not same_video(E("porntn", "Anissa Kate-GLORYHOLE", 1325), E("porntn", "Anissa Kate-GLORYHOLE", 1325)),
+        "two scenes on one site with a thin title are not merged",
+        not same_video(E("porntn", "Anissa Kate-GLORYHOLE", 1325), E("porntn", "Anissa Kate-GLORYHOLE", 1203)),
+    )
+    check(
+        "a repost on one site, same title and length, is merged",
+        same_video(E("thothub", "Molly Little Pregnant Fuck and Messy Cum", 1005),
+                   E("thothub", "Molly Little - Pregnant Fuck & Messy Cum", 1005)),
+    )
+    check(
+        "a short clip with a generic title never merges on length alone",
+        not same_video(E("hornyfans", "Grace Charis Nude Golfing Fun", 285, "Grace Charis"), E("thothd", "Grace Charis ONLY FANS Video", 285, "Grace Charis")),
+    )
+    check(
+        "short clips sharing one word are not merged",
+        not same_video(E("hornyleak", "Grace Charis Nude Titty Show POV", 57, "Grace Charis"), E("hornyfans", "Grace Charis Naked Wet Shower POV", 58, "Grace Charis")),
+    )
+    check(
+        "a long video with a generic title still merges on length",
+        same_video(E("hornyfans", "Kittiebabyxxx POV Vibrator Masturbation action", 455, "Kittiebabyxxx"), E("thothd", "Kittiebabyxxx OnlyFans Leak", 455, "Kittiebabyxxx")),
+    )
+    check(
+        "a long video with some shared words merges",
+        same_video(E("hornyleak", "Ashlyn Angel Having Threeway With JackandJill", 6856, "JackAndJill"),
+                   E("ultrathots", "JackAndJill Intense Threesome With Ashlyn Angel", 6857, "JackAndJill")),
     )
     check(
         "a generic shared word is not identity",
